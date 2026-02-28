@@ -82,9 +82,11 @@ class _LocalApiProcess:
         parsed = parse.urlparse(self._base_url)
         env = os.environ.copy()
         env.setdefault("PORT", str(parsed.port or 8000))
-        env.setdefault("JOBCOACH_DB_PATH", str(self._db_path))
-        env.setdefault("SQLITE_DB_PATH", str(self._db_path))
-        env.setdefault("DATABASE_URL", f"sqlite:///{self._db_path}")
+        # Force the subprocess to use the bootstrapped contract DB even if parent
+        # env (e.g. docker-compose) already defines persistent DB locations.
+        env["JOBCOACH_DB_PATH"] = str(self._db_path)
+        env["SQLITE_DB_PATH"] = str(self._db_path)
+        env["DATABASE_URL"] = f"sqlite:///{self._db_path}"
 
         self._process = subprocess.Popen(
             self._command,
@@ -232,6 +234,7 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertIn("candidate_ingestions", table_names)
         self.assertIn("interview_sessions", table_names)
         self.assertIn("feedback_reports", table_names)
+        self.assertIn("negotiation_plans", table_names)
         self.assertIn("trajectory_plans", table_names)
 
     def test_post_and_get_job_ingestion_contract(self) -> None:
@@ -1087,6 +1090,153 @@ class JobIngestionApiContractTest(unittest.TestCase):
             self.base_url,
             "GET",
             f"{API_PREFIX}/feedback-reports/fb_missing_001",
+        )
+        self.assertEqual(get_missing_status, 404, get_missing_body)
+        self.assertEqual(get_missing_body.get("error", {}).get("code"), "not_found")
+
+    def test_create_and_get_negotiation_plan_contract(self) -> None:
+        candidate_id = self._create_candidate_entity_for_interview()
+        target_role = "Senior Backend Engineer"
+        idempotency_key = f"negotiation-create-{uuid.uuid4()}"
+
+        create_status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+                "current_base_salary": 150000,
+                "target_base_salary": 180000,
+                "compensation_currency": "usd",
+                "offer_deadline_date": "2026-03-10",
+            },
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        self.assertEqual(create_status, 201, create_body)
+        data = create_body.get("data", {})
+        negotiation_plan_id = data.get("negotiation_plan_id")
+        self.assertIsInstance(negotiation_plan_id, str)
+        self.assertTrue(negotiation_plan_id)
+        assert isinstance(negotiation_plan_id, str)
+        self.assertEqual(data.get("candidate_id"), candidate_id)
+        self.assertEqual(data.get("target_role"), target_role)
+        self.assertEqual(data.get("offer_deadline_date"), "2026-03-10")
+        compensation_targets = data.get("compensation_targets")
+        self.assertIsInstance(compensation_targets, dict)
+        assert isinstance(compensation_targets, dict)
+        self.assertEqual(compensation_targets.get("currency"), "USD")
+        self.assertEqual(compensation_targets.get("current_base_salary"), 150000)
+        self.assertEqual(compensation_targets.get("target_base_salary"), 180000)
+        self.assertGreaterEqual(compensation_targets.get("anchor_base_salary", 0), 180000)
+        self.assertGreaterEqual(compensation_targets.get("walk_away_base_salary", 0), 150000)
+        self.assertIsInstance(data.get("talking_points"), list)
+        self.assertGreaterEqual(len(data.get("talking_points", [])), 1)
+        self.assertIsInstance(data.get("follow_up_actions"), list)
+        self.assertGreaterEqual(len(data.get("follow_up_actions", [])), 1)
+
+        get_status, get_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/negotiation-plans/{negotiation_plan_id}",
+        )
+        self.assertEqual(get_status, 200, get_body)
+        self.assertEqual(get_body.get("data", {}).get("negotiation_plan_id"), negotiation_plan_id)
+        self.assertEqual(get_body.get("data", {}).get("candidate_id"), candidate_id)
+        self.assertEqual(get_body.get("data", {}).get("target_role"), target_role)
+        self.assertEqual(get_body.get("data", {}).get("compensation_targets"), data.get("compensation_targets"))
+
+        self._assert_negotiation_plan_row_persisted(
+            negotiation_plan_id=negotiation_plan_id,
+            candidate_id=candidate_id,
+            target_role=target_role,
+            idempotency_key=idempotency_key,
+        )
+
+    def test_negotiation_plan_validation_and_not_found_contract(self) -> None:
+        candidate_id = self._create_candidate_entity_for_interview()
+
+        missing_header_status, missing_header_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={"candidate_id": candidate_id, "target_role": "Backend Engineer"},
+        )
+        self.assertEqual(missing_header_status, 400, missing_header_body)
+        self.assertEqual(missing_header_body.get("error", {}).get("code"), "invalid_request")
+
+        invalid_body_status, invalid_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={},
+            headers={"Idempotency-Key": "negotiation-invalid-body-001"},
+        )
+        self.assertEqual(invalid_body_status, 400, invalid_body)
+        self.assertEqual(invalid_body.get("error", {}).get("code"), "invalid_request")
+
+        invalid_salary_status, invalid_salary_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Backend Engineer",
+                "current_base_salary": 160000,
+                "target_base_salary": 150000,
+            },
+            headers={"Idempotency-Key": "negotiation-invalid-salary-001"},
+        )
+        self.assertEqual(invalid_salary_status, 400, invalid_salary_body)
+        self.assertEqual(invalid_salary_body.get("error", {}).get("code"), "invalid_request")
+
+        first_status, first_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={"candidate_id": candidate_id, "target_role": "Backend Engineer"},
+            headers={"Idempotency-Key": "negotiation-contract-idempotency-001"},
+        )
+        self.assertEqual(first_status, 201, first_body)
+        first_plan_id = first_body.get("data", {}).get("negotiation_plan_id")
+        self.assertIsInstance(first_plan_id, str)
+        self.assertTrue(first_plan_id)
+        assert isinstance(first_plan_id, str)
+
+        replay_status, replay_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={"candidate_id": candidate_id, "target_role": "Backend Engineer"},
+            headers={"Idempotency-Key": "negotiation-contract-idempotency-001"},
+        )
+        self.assertEqual(replay_status, 201, replay_body)
+        self.assertEqual(replay_body.get("data", {}).get("negotiation_plan_id"), first_plan_id)
+
+        conflict_status, conflict_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={"candidate_id": candidate_id, "target_role": "Principal Backend Engineer"},
+            headers={"Idempotency-Key": "negotiation-contract-idempotency-001"},
+        )
+        self.assertEqual(conflict_status, 409, conflict_body)
+        self.assertEqual(conflict_body.get("error", {}).get("code"), "idempotency_key_conflict")
+
+        missing_candidate_status, missing_candidate_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={"candidate_id": "cand_missing_negotiation_001", "target_role": "Backend Engineer"},
+            headers={"Idempotency-Key": "negotiation-missing-candidate-001"},
+        )
+        self.assertEqual(missing_candidate_status, 404, missing_candidate_body)
+        self.assertEqual(missing_candidate_body.get("error", {}).get("code"), "not_found")
+
+        get_missing_status, get_missing_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/negotiation-plans/np_missing_001",
         )
         self.assertEqual(get_missing_status, 404, get_missing_body)
         self.assertEqual(get_missing_body.get("error", {}).get("code"), "not_found")
@@ -2097,6 +2247,39 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual([entry.get("day") for entry in payload.get("action_plan", [])], list(range(1, 31)))
         self.assertEqual(int(row[4]), int(payload.get("version", 0)))
         self.assertEqual(payload.get("supersedes_feedback_report_id"), row[5])
+
+    def _assert_negotiation_plan_row_persisted(
+        self,
+        *,
+        negotiation_plan_id: str,
+        candidate_id: str,
+        target_role: str,
+        idempotency_key: str,
+    ) -> None:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT negotiation_plan_id, candidate_id, target_role, idempotency_key, payload_json
+                FROM negotiation_plans
+                WHERE negotiation_plan_id = ?
+                """,
+                (negotiation_plan_id,),
+            ).fetchone()
+
+        self.assertIsNotNone(row, f"Negotiation plan row missing for negotiation_plan_id={negotiation_plan_id}")
+        assert row is not None
+        self.assertEqual(row[0], negotiation_plan_id)
+        self.assertEqual(row[1], candidate_id)
+        self.assertEqual(row[2], target_role)
+        self.assertEqual(row[3], idempotency_key)
+        payload = json.loads(str(row[4]))
+        self.assertEqual(payload.get("negotiation_plan_id"), negotiation_plan_id)
+        self.assertEqual(payload.get("candidate_id"), candidate_id)
+        self.assertEqual(payload.get("target_role"), target_role)
+        self.assertIsInstance(payload.get("compensation_targets"), dict)
+        self.assertIsInstance(payload.get("talking_points"), list)
+        self.assertIsInstance(payload.get("follow_up_actions"), list)
+        self.assertGreaterEqual(len(payload.get("follow_up_actions", [])), 1)
 
     def _assert_trajectory_plan_row_persisted(
         self,

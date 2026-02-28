@@ -39,6 +39,7 @@ class SchemaValidationContractTest(unittest.TestCase):
             "CandidateProfile": "candidate_profile.json",
             "InterviewSession": "interview_session.json",
             "FeedbackReport": "feedback_report.json",
+            "NegotiationPlan": "negotiation_plan.json",
             "TrajectoryPlan": "trajectory_plan.json",
         }
 
@@ -69,6 +70,11 @@ class SchemaValidationContractTest(unittest.TestCase):
                 "fixture": "feedback_report_bad_severity.json",
                 "path": "$.top_gaps[0].severity",
                 "message": "enum",
+            },
+            "NegotiationPlan": {
+                "fixture": "negotiation_plan_negative_day_offset.json",
+                "path": "$.follow_up_actions[0].day_offset",
+                "message": "value must be >= 0",
             },
             "TrajectoryPlan": {
                 "fixture": "trajectory_plan_bad_target_date.json",

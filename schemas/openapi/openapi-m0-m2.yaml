@@ -271,6 +271,42 @@ paths:
               schema:
                 $ref: '#/components/schemas/FeedbackReportResponse'
 
+  /negotiation-plans:
+    post:
+      summary: Create a negotiation plan for a candidate
+      operationId: createNegotiationPlan
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNegotiationPlanRequest'
+      responses:
+        '201':
+          description: Negotiation plan created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NegotiationPlanResponse'
+        '409':
+          description: Idempotency conflict
+
+  /negotiation-plans/{negotiation_plan_id}:
+    get:
+      summary: Get negotiation plan
+      operationId: getNegotiationPlan
+      parameters:
+        - $ref: '#/components/parameters/NegotiationPlanId'
+      responses:
+        '200':
+          description: Negotiation plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NegotiationPlanResponse'
+
   /trajectory-plans:
     post:
       summary: Create a trajectory plan for a candidate
@@ -398,6 +434,12 @@ components:
     FeedbackReportId:
       in: path
       name: feedback_report_id
+      required: true
+      schema:
+        type: string
+    NegotiationPlanId:
+      in: path
+      name: negotiation_plan_id
       required: true
       schema:
         type: string
@@ -919,6 +961,31 @@ components:
         meta: { $ref: '#/components/schemas/Meta' }
         error: { type: 'null' }
 
+    CreateNegotiationPlanRequest:
+      type: object
+      required: [candidate_id, target_role]
+      properties:
+        candidate_id: { type: string }
+        target_role: { type: string }
+        compensation_currency: { type: string }
+        current_base_salary:
+          type: integer
+          minimum: 0
+        target_base_salary:
+          type: integer
+          minimum: 0
+        offer_deadline_date:
+          type: string
+          format: date
+
+    NegotiationPlanResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/NegotiationPlan'
+        meta: { $ref: '#/components/schemas/Meta' }
+        error: { type: 'null' }
+
     CreateTrajectoryPlanRequest:
       type: object
       required: [candidate_id, target_role]
@@ -1066,6 +1133,64 @@ components:
         version:
           type: integer
           minimum: 1
+
+    NegotiationPlan:
+      type: object
+      required:
+        [
+          negotiation_plan_id,
+          candidate_id,
+          target_role,
+          strategy_summary,
+          compensation_targets,
+          talking_points,
+          follow_up_actions,
+          generated_at,
+        ]
+      properties:
+        negotiation_plan_id: { type: string }
+        candidate_id: { type: string }
+        target_role: { type: string }
+        strategy_summary: { type: string }
+        offer_deadline_date:
+          type: string
+          format: date
+        compensation_targets:
+          type: object
+          required:
+            [currency, current_base_salary, target_base_salary, anchor_base_salary, walk_away_base_salary]
+          properties:
+            currency: { type: string }
+            current_base_salary:
+              type: integer
+              minimum: 0
+            target_base_salary:
+              type: integer
+              minimum: 0
+            anchor_base_salary:
+              type: integer
+              minimum: 0
+            walk_away_base_salary:
+              type: integer
+              minimum: 0
+        talking_points:
+          type: array
+          minItems: 1
+          items: { type: string }
+        follow_up_actions:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [day_offset, action]
+            properties:
+              day_offset:
+                type: integer
+                minimum: 0
+              action: { type: string }
+        generated_at:
+          type: string
+          format: date-time
 
     TrajectoryPlan:
       type: object

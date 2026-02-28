@@ -120,3 +120,27 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Rely only on endpoint unit/contract tests without a benchmark gate.
   - Gate only trajectory planner output quality and omit dashboard consistency checks.
+
+- Decision ID: `DEC-010`
+- Date (UTC): `2026-02-28`
+- Status: `accepted`
+- Context: M6 scope ("negotiation and post-interview support") is broad and could sprawl across contracts, strategy generation, follow-up content, and persistence unless decomposed with the same deterministic pattern used in M3-M5.
+- Decision: Decompose M6 into six tasks (`M6-001`..`M6-006`) in contract-first order: negotiation plan API/storage foundation, deterministic negotiation-context aggregation, strategy generation, post-interview follow-up planning, versioned persistence semantics, then benchmark threshold gating.
+- Consequences:
+  - M6 has a single executable critical path with explicit acceptance gates and lower integration risk.
+  - Negotiation/follow-up output quality gates are deferred until core contract and orchestration behavior is stable.
+- Alternatives considered:
+  - Implement M6 as one bundled epic with mixed contract/generation work.
+  - Start with follow-up templates before contract and persistence foundations are in place.
+
+- Decision ID: `DEC-011`
+- Date (UTC): `2026-02-28`
+- Status: `accepted`
+- Context: M6 execution needed a stable API/storage foundation for negotiation and post-interview support before introducing derived signal logic and strategy generation.
+- Decision: Introduce `NegotiationPlan` as the M6 anchor contract (`POST/GET /negotiation-plans`) with schema-validated deterministic payloads and idempotent persistence semantics.
+- Consequences:
+  - Downstream M6 tasks can build on a fixed persisted entity and contract-tested API surface.
+  - Initial negotiation payload content is intentionally baseline and will be expanded by subsequent deterministic aggregation/generation tasks.
+- Alternatives considered:
+  - Delay contract/storage work and begin with free-form negotiation generation logic.
+  - Extend `TrajectoryPlan` instead of introducing a dedicated M6 negotiation entity.

@@ -1548,3 +1548,79 @@ Use UTC timestamps. Append entries only.
   - No remaining blockers for `M5-006`.
 - Next pointer:
   - Execute `M6-PLAN-001` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T23:46:02Z
+- Execute `M6-PLAN-001` and advance to first executable M6 implementation task.
+- Task IDs: M6-PLAN-001
+- Changes made:
+  - Started M6 planning pass to convert negotiation/post-interview scope into an executable task graph.
+- Validation evidence:
+  - Planned: consistency checks across `docs/tasklist.md`, `docs/NEXT_ACTION.md`, `docs/work-log.md`, and `docs/decision-log.md`.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete M6 task graph and move active pointer to `M6-001`.
+
+- END
+- 2026-02-28T23:47:11Z
+- Execute `M6-PLAN-001` and advance to first executable M6 implementation task.
+- Task IDs: M6-PLAN-001
+- Changes made:
+  - Marked `M6-PLAN-001` as `DONE` in `docs/tasklist.md`.
+  - Added executable M6 task graph (`M6-001` to `M6-006`) with dependency ordering and acceptance criteria.
+  - Updated `docs/tasklist.md` NEXT queue to prioritize `M6-001` then `M6-002`.
+  - Updated `docs/NEXT_ACTION.md` active pointer to `M6-001` with concrete implementation and validation steps.
+  - Logged planning decision `DEC-010` in `docs/decision-log.md` documenting M6 contract-first decomposition.
+- Validation evidence:
+  - Planning artifacts are aligned and pointer-consistent (`docs/tasklist.md`, `docs/NEXT_ACTION.md`, `docs/work-log.md`, `docs/decision-log.md`).
+- Blockers / risks:
+  - No blockers encountered.
+- Next pointer:
+  - Execute `M6-001` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T23:47:30Z
+- Execute `M6-001` negotiation plan contracts/storage foundation.
+- Task IDs: M6-001
+- Changes made:
+  - Started implementation of `NegotiationPlan` contract/storage/API foundation with idempotent create/get semantics.
+- Validation evidence:
+  - Planned: schema + migration + unit + contract validation gates.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete `M6-001` and advance pointer to `M6-002`.
+
+- END
+- 2026-02-28T23:55:15Z
+- Execute `M6-001` negotiation plan contracts/storage foundation.
+- Task IDs: M6-001
+- Changes made:
+  - Added migration `infra/migrations/010_m6_negotiation_plans.sql` to persist `negotiation_plans` with idempotency semantics and candidate/role indexes.
+  - Extended contracts:
+    - `schemas/openapi/openapi-m0-m2.yaml`: added `POST /negotiation-plans`, `GET /negotiation-plans/{negotiation_plan_id}`, request/response schemas, and path parameter.
+    - `schemas/jsonschema/core-schemas.json`: added `NegotiationPlan` definition.
+  - Implemented API and repository negotiation flow:
+    - `apps/api-gateway/api_gateway/app.py`: routed create/get endpoints, request validation, deterministic payload generation, schema validation, and error semantics.
+    - `apps/api-gateway/api_gateway/repository.py`: added idempotent create/replay/conflict persistence and retrieval methods for negotiation plans.
+  - Added test coverage:
+    - `tests/unit/test_job_spec_persistence.py`: negotiation create/get persistence, schema validity, validation errors, idempotency replay/conflict, and not-found behavior.
+    - `tests/contracts/test_job_ingestions_api_contract.py`: negotiation create/get contract checks, validation/not-found/idempotency behavior, schema bootstrap table assertion, and DB persistence helper.
+    - `tests/contracts/test_schema_validation.py` + new fixtures for `NegotiationPlan` valid/invalid schema cases.
+  - Updated planning artifacts:
+    - Marked `M6-001` as `DONE` and advanced queue in `docs/tasklist.md`.
+    - Moved `docs/NEXT_ACTION.md` pointer to `M6-002`.
+    - Added `DEC-011` in `docs/decision-log.md`.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/contracts/test_schema_validation.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/contracts/test_contract_artifacts.py`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+  - `MIGRATE_DB_PATH=.tmp/m6-plan-local.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh up`
+  - `MIGRATE_DB_PATH=.tmp/m6-plan-local.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh down`
+- Blockers / risks:
+  - No blockers encountered.
+- Next pointer:
+  - Execute `M6-002` from `docs/NEXT_ACTION.md`.

@@ -1106,6 +1106,184 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertIsInstance(rewrites, list)
         self.assertGreaterEqual(len(rewrites), 1)
 
+    def test_create_and_get_negotiation_plan_persists_schema_valid_row(self) -> None:
+        _, candidate_id = self._create_candidate_profile()
+        target_role = "Senior Backend Engineer"
+
+        create_status, _, create_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+                "current_base_salary": 155000,
+                "target_base_salary": 180000,
+                "compensation_currency": "usd",
+                "offer_deadline_date": "2026-03-15",
+            },
+            headers={"Idempotency-Key": "negotiation-unit-create-001"},
+        )
+        self.assertEqual(create_status, 201, create_body)
+        self.assertIsNone(create_body["error"])
+        plan = create_body["data"]
+        negotiation_plan_id = plan.get("negotiation_plan_id")
+        self.assertIsInstance(negotiation_plan_id, str)
+        self.assertTrue(negotiation_plan_id)
+        assert isinstance(negotiation_plan_id, str)
+        self.assertEqual(plan.get("candidate_id"), candidate_id)
+        self.assertEqual(plan.get("target_role"), target_role)
+        self.assertEqual(plan.get("offer_deadline_date"), "2026-03-15")
+        compensation_targets = plan.get("compensation_targets")
+        self.assertIsInstance(compensation_targets, dict)
+        assert isinstance(compensation_targets, dict)
+        self.assertEqual(compensation_targets.get("currency"), "USD")
+        self.assertEqual(compensation_targets.get("current_base_salary"), 155000)
+        self.assertEqual(compensation_targets.get("target_base_salary"), 180000)
+        self.assertGreaterEqual(compensation_targets.get("anchor_base_salary", 0), 180000)
+        self.assertGreaterEqual(compensation_targets.get("walk_away_base_salary", 0), 155000)
+        self.assertIsInstance(plan.get("talking_points"), list)
+        self.assertGreaterEqual(len(plan.get("talking_points", [])), 1)
+        self.assertIsInstance(plan.get("follow_up_actions"), list)
+        self.assertGreaterEqual(len(plan.get("follow_up_actions", [])), 1)
+
+        validation = self.validator.validate("NegotiationPlan", plan)
+        self.assertTrue(validation.is_valid, f"NegotiationPlan validation failed: {validation.issues}")
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    negotiation_plan_id,
+                    candidate_id,
+                    target_role,
+                    idempotency_key,
+                    payload_json
+                FROM negotiation_plans
+                WHERE negotiation_plan_id = ?
+                """,
+                (negotiation_plan_id,),
+            ).fetchone()
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row[0], negotiation_plan_id)
+        self.assertEqual(row[1], candidate_id)
+        self.assertEqual(row[2], target_role)
+        self.assertEqual(row[3], "negotiation-unit-create-001")
+        payload = json.loads(str(row[4]))
+        self.assertEqual(payload.get("negotiation_plan_id"), negotiation_plan_id)
+        self.assertEqual(payload.get("candidate_id"), candidate_id)
+        self.assertEqual(payload.get("target_role"), target_role)
+
+        get_status, _, get_body = _request(
+            self.app,
+            method="GET",
+            path=f"/v1/negotiation-plans/{negotiation_plan_id}",
+        )
+        self.assertEqual(get_status, 200, get_body)
+        self.assertEqual(get_body["data"].get("negotiation_plan_id"), negotiation_plan_id)
+        self.assertEqual(get_body["data"].get("compensation_targets"), plan.get("compensation_targets"))
+
+    def test_negotiation_plan_endpoints_validate_request_shape_and_idempotency(self) -> None:
+        _, candidate_id = self._create_candidate_profile()
+
+        missing_header_status, _, missing_header_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={"candidate_id": candidate_id, "target_role": "Backend Engineer"},
+        )
+        self.assertEqual(missing_header_status, 400, missing_header_body)
+        self.assertEqual(missing_header_body["error"]["code"], "invalid_request")
+
+        invalid_body_status, _, invalid_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={},
+            headers={"Idempotency-Key": "negotiation-unit-invalid-body-001"},
+        )
+        self.assertEqual(invalid_body_status, 400, invalid_body)
+        self.assertEqual(invalid_body["error"]["code"], "invalid_request")
+
+        invalid_salary_status, _, invalid_salary_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Backend Engineer",
+                "current_base_salary": 150000,
+                "target_base_salary": 140000,
+            },
+            headers={"Idempotency-Key": "negotiation-unit-invalid-salary-001"},
+        )
+        self.assertEqual(invalid_salary_status, 400, invalid_salary_body)
+        self.assertEqual(invalid_salary_body["error"]["code"], "invalid_request")
+
+        first_status, _, first_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Backend Engineer",
+                "target_base_salary": 185000,
+            },
+            headers={"Idempotency-Key": "negotiation-unit-idempotency-001"},
+        )
+        self.assertEqual(first_status, 201, first_body)
+        first_plan_id = first_body["data"].get("negotiation_plan_id")
+        self.assertIsInstance(first_plan_id, str)
+        self.assertTrue(first_plan_id)
+        assert isinstance(first_plan_id, str)
+
+        replay_status, _, replay_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Backend Engineer",
+                "target_base_salary": 185000,
+            },
+            headers={"Idempotency-Key": "negotiation-unit-idempotency-001"},
+        )
+        self.assertEqual(replay_status, 201, replay_body)
+        self.assertEqual(replay_body["data"].get("negotiation_plan_id"), first_plan_id)
+
+        conflict_status, _, conflict_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Principal Backend Engineer",
+                "target_base_salary": 200000,
+            },
+            headers={"Idempotency-Key": "negotiation-unit-idempotency-001"},
+        )
+        self.assertEqual(conflict_status, 409, conflict_body)
+        self.assertEqual(conflict_body["error"]["code"], "idempotency_key_conflict")
+
+        missing_candidate_status, _, missing_candidate_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={"candidate_id": "cand_missing_negotiation_unit_001", "target_role": "Backend Engineer"},
+            headers={"Idempotency-Key": "negotiation-unit-missing-candidate-001"},
+        )
+        self.assertEqual(missing_candidate_status, 404, missing_candidate_body)
+        self.assertEqual(missing_candidate_body["error"]["code"], "not_found")
+
+        get_missing_status, _, get_missing_body = _request(
+            self.app,
+            method="GET",
+            path="/v1/negotiation-plans/np_missing_unit_001",
+        )
+        self.assertEqual(get_missing_status, 404, get_missing_body)
+        self.assertEqual(get_missing_body["error"]["code"], "not_found")
+
     def test_create_and_get_trajectory_plan_persists_schema_valid_row(self) -> None:
         _, candidate_id = self._create_candidate_profile()
         target_role = "Senior Backend Engineer"

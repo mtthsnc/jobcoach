@@ -1,0 +1,29 @@
+{
+  "negotiation_plan_id": "np-001",
+  "candidate_id": "cand-001",
+  "target_role": "Senior Backend Engineer",
+  "strategy_summary": "Lead with impact evidence, anchor confidently, and trade concessions for scope clarity.",
+  "offer_deadline_date": "2026-03-15",
+  "compensation_targets": {
+    "currency": "USD",
+    "current_base_salary": 150000,
+    "target_base_salary": 180000,
+    "anchor_base_salary": 190000,
+    "walk_away_base_salary": 165000
+  },
+  "talking_points": [
+    "Highlight measurable impact from last two roles.",
+    "Position compensation ask around expanded scope and delivery outcomes."
+  ],
+  "follow_up_actions": [
+    {
+      "day_offset": 0,
+      "action": "Send same-day thank-you note with key value themes."
+    },
+    {
+      "day_offset": 3,
+      "action": "Request decision timeline and next-step clarity."
+    }
+  ],
+  "generated_at": "2026-02-20T12:30:00+00:00"
+}

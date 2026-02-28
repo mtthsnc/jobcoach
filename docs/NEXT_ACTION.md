@@ -6,24 +6,26 @@
 
 ## Active Task
 
-- Task ID: `M6-PLAN-001`
-- Task: Define executable M6 backlog with dependencies and acceptance criteria.
-- Why now: `M5-006` completed with deterministic trajectory quality gates, so execution can move from M5 delivery into M6 planning for negotiation and post-interview support.
+- Task ID: `M6-002`
+- Task: Build deterministic negotiation-context aggregator from offer inputs + interview/feedback/trajectory history.
+- Why now: `M6-001` completed the contract/storage foundation, so M6 can now harden deterministic signal generation before strategy/follow-up synthesis.
 
 ## Exact Next Steps
 
-1. Translate the M6 scope from `docs/masterplan.md` and `docs/implementation-plan.md` into an executable task graph.
-2. Define `M6-001+` tasks with dependency ordering, acceptance criteria, and quality gates (including contract/schema/benchmark expectations where applicable).
-3. Update `docs/tasklist.md` with the full M6 queue and clear `TODO` statuses.
-4. Update this pointer to the first executable M6 task after planning is committed.
+1. Add deterministic negotiation-context aggregation module (inputs: candidate offer context + latest trajectory signals + feedback/interview trends).
+2. Integrate aggregation output into negotiation plan generation payload under explicit structured fields (`compensation_targets`, leverage/risk signals, evidence links).
+3. Add fixture-driven unit tests to lock deterministic ordering/math for identical histories.
+4. Extend API/unit/contract tests to assert context fields are stable, reproducible, and schema-valid.
+5. Run `make validate-openapi`, `make migrate-up`, `make migrate-down`, `make test`, and `make contract-test`.
 
 ## Validation Required
 
 - Confirm planning artifacts are coherent and actionable:
-  - `docs/tasklist.md` includes M6 tasks with dependencies and acceptance criteria.
-  - `docs/NEXT_ACTION.md` points to the first executable M6 task.
-  - `docs/work-log.md` records planning evidence and pointer advancement.
+  - Aggregated negotiation-context signals are deterministic on fixed fixtures.
+  - Negotiation plan payload remains schema-valid after context integration.
+  - Unit/contract suites assert stable signal ordering and numeric bounds.
+  - `docs/work-log.md` records M6-002 execution evidence.
 
 ## Return Pointer
 
-After `M6-PLAN-001` is complete, execute the first M6 implementation task.
+After `M6-002` is complete, advance pointer to `M6-003`.

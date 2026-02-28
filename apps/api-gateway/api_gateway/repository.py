@@ -87,6 +87,12 @@ class TrajectoryPlanCreateResult:
     current_version: int | None
 
 
+@dataclass(frozen=True)
+class NegotiationPlanCreateResult:
+    status: str
+    plan: dict[str, Any] | None
+
+
 class SQLiteJobIngestionRepository:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = str(db_path)
@@ -604,6 +610,96 @@ class SQLiteJobIngestionRepository:
             ).fetchone()
 
         return _row_to_feedback_report(row) if row is not None else None
+
+    def create_or_get_negotiation_plan(
+        self,
+        *,
+        idempotency_key: str,
+        request_payload: dict[str, Any],
+        negotiation_plan: dict[str, Any],
+    ) -> NegotiationPlanCreateResult:
+        negotiation_plan_id = str(negotiation_plan.get("negotiation_plan_id", "")).strip()
+        candidate_id = str(negotiation_plan.get("candidate_id", "")).strip()
+        target_role = str(negotiation_plan.get("target_role", "")).strip()
+        if not negotiation_plan_id or not candidate_id or not target_role:
+            raise ValueError(
+                "negotiation_plan must include non-empty negotiation_plan_id, candidate_id, and target_role"
+            )
+
+        request_json = _canonical_json(request_payload)
+
+        with closing(self._connect()) as connection:
+            with connection:
+                candidate_row = connection.execute(
+                    "SELECT 1 FROM candidate_profiles WHERE candidate_id = ?",
+                    (candidate_id,),
+                ).fetchone()
+                if candidate_row is None:
+                    return NegotiationPlanCreateResult(status="candidate_not_found", plan=None)
+
+                existing_row = connection.execute(
+                    """
+                    SELECT request_json, payload_json
+                    FROM negotiation_plans
+                    WHERE idempotency_key = ?
+                    """,
+                    (idempotency_key,),
+                ).fetchone()
+                if existing_row is not None:
+                    existing_request_json = str(existing_row["request_json"])
+                    existing_payload = _row_to_negotiation_plan(existing_row)
+                    if existing_request_json == request_json:
+                        return NegotiationPlanCreateResult(status="idempotent_replay", plan=existing_payload)
+                    return NegotiationPlanCreateResult(status="idempotency_conflict", plan=existing_payload)
+
+                payload_json = _canonical_json(negotiation_plan)
+                connection.execute(
+                    """
+                    INSERT INTO negotiation_plans (
+                        negotiation_plan_id,
+                        candidate_id,
+                        target_role,
+                        idempotency_key,
+                        request_json,
+                        payload_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        negotiation_plan_id,
+                        candidate_id,
+                        target_role,
+                        idempotency_key,
+                        request_json,
+                        payload_json,
+                    ),
+                )
+
+                row = connection.execute(
+                    """
+                    SELECT payload_json
+                    FROM negotiation_plans
+                    WHERE negotiation_plan_id = ?
+                    """,
+                    (negotiation_plan_id,),
+                ).fetchone()
+                if row is None:
+                    return NegotiationPlanCreateResult(status="not_found", plan=None)
+
+                return NegotiationPlanCreateResult(status="created", plan=_row_to_negotiation_plan(row))
+
+    def get_negotiation_plan_by_id(self, negotiation_plan_id: str) -> dict[str, Any] | None:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT payload_json
+                FROM negotiation_plans
+                WHERE negotiation_plan_id = ?
+                """,
+                (negotiation_plan_id,),
+            ).fetchone()
+
+        return _row_to_negotiation_plan(row) if row is not None else None
 
     def create_or_get_trajectory_plan(
         self,
@@ -1291,6 +1387,12 @@ def _row_to_interview_session(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 
 def _row_to_feedback_report(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return _decode_json_object(str(row["payload_json"]))
+
+
+def _row_to_negotiation_plan(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
     return _decode_json_object(str(row["payload_json"]))

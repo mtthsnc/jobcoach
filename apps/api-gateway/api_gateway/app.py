@@ -29,6 +29,7 @@ TRAJECTORY_PLANNER_PATH = ROOT_DIR / "services" / "trajectory-planning" / "gener
 INTERVIEW_ROUTE_PREFIX = "/v1/interview-sessions/"
 INTERVIEW_RESPONSES_SUFFIX = "/responses"
 FEEDBACK_ROUTE_PREFIX = "/v1/feedback-reports/"
+NEGOTIATION_ROUTE_PREFIX = "/v1/negotiation-plans/"
 TRAJECTORY_ROUTE_PREFIX = "/v1/trajectory-plans/"
 JOB_SPEC_ROUTE_PREFIX = "/v1/job-specs/"
 JOB_SPEC_REVIEW_ROUTE_SUFFIX = "/review"
@@ -244,6 +245,37 @@ class JobIngestionAPI:
                 start_response,
                 request_id=request_id,
                 feedback_report_id=feedback_report_id,
+            )
+
+        if path == "/v1/negotiation-plans":
+            if method != "POST":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "POST")],
+                )
+            return self._handle_create_negotiation_plan(environ, start_response, request_id=request_id)
+
+        if path.startswith(NEGOTIATION_ROUTE_PREFIX):
+            negotiation_plan_id = unquote(path[len(NEGOTIATION_ROUTE_PREFIX) :])
+            if not negotiation_plan_id or "/" in negotiation_plan_id:
+                return _json_response(
+                    start_response,
+                    HTTPStatus.NOT_FOUND,
+                    _error_envelope(request_id=request_id, code="not_found", message="Resource not found", retryable=False),
+                )
+            if method != "GET":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "GET")],
+                )
+            return self._handle_get_negotiation_plan(
+                start_response,
+                request_id=request_id,
+                negotiation_plan_id=negotiation_plan_id,
             )
 
         if path == "/v1/trajectory-plans":
@@ -1128,6 +1160,161 @@ class JobIngestionAPI:
             _success_envelope(request_id=request_id, data=payload),
         )
 
+    def _handle_create_negotiation_plan(
+        self,
+        environ: dict[str, Any],
+        start_response: Any,
+        *,
+        request_id: str,
+    ) -> list[bytes]:
+        idempotency_key = str(environ.get("HTTP_IDEMPOTENCY_KEY", "")).strip()
+        if not idempotency_key:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Idempotency-Key header is required",
+                    retryable=False,
+                    details=[{"field": "Idempotency-Key", "reason": "required"}],
+                ),
+            )
+
+        payload, payload_error = _parse_json_payload(environ)
+        if payload_error:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message=payload_error,
+                    retryable=False,
+                ),
+            )
+
+        validation_errors = _validate_create_negotiation_plan_payload(payload)
+        if validation_errors:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Request body validation failed",
+                    retryable=False,
+                    details=validation_errors,
+                ),
+            )
+
+        candidate_id = str(payload["candidate_id"])
+        target_role = str(payload["target_role"])
+        candidate_profile = self._repository.get_candidate_profile_by_id(candidate_id)
+        if candidate_profile is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Candidate profile not found",
+                    retryable=False,
+                ),
+            )
+
+        negotiation_plan_payload = self._build_negotiation_plan_payload(
+            candidate_id=candidate_id,
+            candidate_profile=candidate_profile,
+            target_role=target_role,
+            request_payload=payload,
+        )
+        validation = self._schema_validator.validate("NegotiationPlan", negotiation_plan_payload)
+        if not validation.is_valid:
+            issue_summary = [{"path": issue.path, "message": issue.message} for issue in validation.issues]
+            return _json_response(
+                start_response,
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_negotiation_plan",
+                    message="Generated NegotiationPlan failed schema validation",
+                    retryable=False,
+                    details=issue_summary,
+                ),
+            )
+
+        create_result = self._repository.create_or_get_negotiation_plan(
+            idempotency_key=idempotency_key,
+            request_payload=payload,
+            negotiation_plan=negotiation_plan_payload,
+        )
+        if create_result.status == "candidate_not_found":
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Candidate profile not found",
+                    retryable=False,
+                ),
+            )
+        if create_result.status == "idempotency_conflict":
+            return _json_response(
+                start_response,
+                HTTPStatus.CONFLICT,
+                _error_envelope(
+                    request_id=request_id,
+                    code="idempotency_key_conflict",
+                    message="Idempotency-Key is already associated with a different request",
+                    retryable=False,
+                ),
+            )
+        if create_result.plan is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                _error_envelope(
+                    request_id=request_id,
+                    code="internal_error",
+                    message="Negotiation plan could not be persisted",
+                    retryable=True,
+                ),
+            )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.CREATED,
+            _success_envelope(request_id=request_id, data=create_result.plan),
+        )
+
+    def _handle_get_negotiation_plan(
+        self,
+        start_response: Any,
+        *,
+        request_id: str,
+        negotiation_plan_id: str,
+    ) -> list[bytes]:
+        payload = self._repository.get_negotiation_plan_by_id(negotiation_plan_id)
+        if payload is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Negotiation plan not found",
+                    retryable=False,
+                ),
+            )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.OK,
+            _success_envelope(request_id=request_id, data=payload),
+        )
+
     def _handle_create_trajectory_plan(
         self,
         environ: dict[str, Any],
@@ -1798,6 +1985,116 @@ class JobIngestionAPI:
 
         return payload
 
+    def _build_negotiation_plan_payload(
+        self,
+        *,
+        candidate_id: str,
+        candidate_profile: dict[str, Any],
+        target_role: str,
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        current_base_salary_raw = request_payload.get("current_base_salary")
+        current_base_salary = (
+            int(current_base_salary_raw)
+            if isinstance(current_base_salary_raw, int)
+            and not isinstance(current_base_salary_raw, bool)
+            and current_base_salary_raw >= 0
+            else None
+        )
+        target_base_salary_raw = request_payload.get("target_base_salary")
+        target_base_salary = (
+            int(target_base_salary_raw)
+            if isinstance(target_base_salary_raw, int)
+            and not isinstance(target_base_salary_raw, bool)
+            and target_base_salary_raw >= 0
+            else None
+        )
+        compensation_currency_raw = request_payload.get("compensation_currency")
+        compensation_currency = (
+            str(compensation_currency_raw).strip().upper()
+            if isinstance(compensation_currency_raw, str) and compensation_currency_raw.strip()
+            else "USD"
+        )
+
+        if target_base_salary is None and current_base_salary is None:
+            target_base_salary = 180000
+            current_base_salary = 160000
+        elif target_base_salary is None and current_base_salary is not None:
+            target_base_salary = current_base_salary + 15000
+        elif target_base_salary is not None and current_base_salary is None:
+            current_base_salary = max(0, target_base_salary - 20000)
+
+        assert current_base_salary is not None
+        assert target_base_salary is not None
+        anchor_base_salary = max(target_base_salary, current_base_salary + 10000)
+        walk_away_base_salary = max(current_base_salary, int(round(target_base_salary * 0.92)))
+        if walk_away_base_salary > anchor_base_salary:
+            walk_away_base_salary = anchor_base_salary
+
+        skills = candidate_profile.get("skills")
+        strength_labels: list[str] = []
+        if isinstance(skills, dict):
+            ranked_strengths: list[tuple[float, str]] = []
+            for skill_name, raw_score in skills.items():
+                if not isinstance(skill_name, str):
+                    continue
+                if not isinstance(raw_score, (int, float)) or isinstance(raw_score, bool):
+                    continue
+                ranked_strengths.append((float(raw_score), skill_name))
+            ranked_strengths.sort(key=lambda item: (-item[0], item[1]))
+            for _, skill_name in ranked_strengths[:3]:
+                strength_labels.append(skill_name.replace("skill.", "").replace("_", " "))
+
+        if not strength_labels:
+            strength_labels = ["delivery impact", "cross-functional communication", "technical depth"]
+
+        role_focus = target_role.strip() or "target role"
+        lead_strength = strength_labels[0]
+        supporting_strengths = ", ".join(strength_labels[:3])
+
+        payload: dict[str, Any] = {
+            "negotiation_plan_id": f"np_{uuid4().hex}",
+            "candidate_id": candidate_id,
+            "target_role": target_role,
+            "strategy_summary": (
+                f"Lead with evidence-backed {lead_strength} outcomes for {role_focus}, "
+                "anchor in your target band, and trade only for concrete scope/value gains."
+            ),
+            "compensation_targets": {
+                "currency": compensation_currency,
+                "current_base_salary": current_base_salary,
+                "target_base_salary": target_base_salary,
+                "anchor_base_salary": anchor_base_salary,
+                "walk_away_base_salary": walk_away_base_salary,
+            },
+            "talking_points": [
+                f"Open with recent wins tied to {supporting_strengths}.",
+                "State target compensation range with scope-impact justification before discussing concessions.",
+                "Trade concessions for explicit commitments (level, scope, review timeline, or sign-on).",
+            ],
+            "follow_up_actions": [
+                {
+                    "day_offset": 0,
+                    "action": "Send same-day thank-you note reinforcing top value proposition and enthusiasm.",
+                },
+                {
+                    "day_offset": 2,
+                    "action": "Share concise accomplishment bullets tied to role outcomes and compensation rationale.",
+                },
+                {
+                    "day_offset": 5,
+                    "action": "Request next-step timeline clarity and confirm decision window for offer response.",
+                },
+            ],
+            "generated_at": _utc_timestamp(),
+        }
+
+        offer_deadline_date = request_payload.get("offer_deadline_date")
+        if isinstance(offer_deadline_date, str) and offer_deadline_date.strip():
+            payload["offer_deadline_date"] = offer_deadline_date.strip()
+
+        return payload
+
     def _build_trajectory_plan_payload(
         self,
         *,
@@ -2038,6 +2335,49 @@ def _validate_create_feedback_report_payload(payload: dict[str, Any]) -> list[di
     regenerate = payload.get("regenerate")
     if regenerate is not None and not isinstance(regenerate, bool):
         errors.append({"field": "regenerate", "reason": "must be a boolean when provided"})
+
+    return errors
+
+
+def _validate_create_negotiation_plan_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+
+    candidate_id = payload.get("candidate_id")
+    if not isinstance(candidate_id, str) or not candidate_id.strip():
+        errors.append({"field": "candidate_id", "reason": "must be a non-empty string"})
+
+    target_role = payload.get("target_role")
+    if not isinstance(target_role, str) or not target_role.strip():
+        errors.append({"field": "target_role", "reason": "must be a non-empty string"})
+
+    compensation_currency = payload.get("compensation_currency")
+    if compensation_currency is not None and (not isinstance(compensation_currency, str) or not compensation_currency.strip()):
+        errors.append({"field": "compensation_currency", "reason": "must be a non-empty string when provided"})
+
+    current_base_salary = payload.get("current_base_salary")
+    if current_base_salary is not None and (
+        not isinstance(current_base_salary, int) or isinstance(current_base_salary, bool) or current_base_salary < 0
+    ):
+        errors.append({"field": "current_base_salary", "reason": "must be an integer >= 0 when provided"})
+
+    target_base_salary = payload.get("target_base_salary")
+    if target_base_salary is not None and (
+        not isinstance(target_base_salary, int) or isinstance(target_base_salary, bool) or target_base_salary < 0
+    ):
+        errors.append({"field": "target_base_salary", "reason": "must be an integer >= 0 when provided"})
+
+    if (
+        isinstance(current_base_salary, int)
+        and not isinstance(current_base_salary, bool)
+        and isinstance(target_base_salary, int)
+        and not isinstance(target_base_salary, bool)
+        and target_base_salary < current_base_salary
+    ):
+        errors.append({"field": "target_base_salary", "reason": "must be >= current_base_salary when both are provided"})
+
+    offer_deadline_date = payload.get("offer_deadline_date")
+    if offer_deadline_date is not None and (not isinstance(offer_deadline_date, str) or not offer_deadline_date.strip()):
+        errors.append({"field": "offer_deadline_date", "reason": "must be a non-empty ISO-8601 date string when provided"})
 
     return errors
 
