@@ -179,6 +179,41 @@ Then continue with `GET` ingestion status endpoints to retrieve created entity I
 - `POST /v1/feedback-reports`
 - `POST /v1/trajectory-plans`
 
+## Docker Quickstart
+
+### Prerequisites
+
+- Docker Engine + Docker Compose plugin
+
+### 1) Build and start API
+
+```bash
+make docker-up
+```
+
+This starts `api` on `http://127.0.0.1:8000`, auto-applies SQLite migrations at container boot, and persists DB state in Docker volume `jobcoach-data`.
+
+### 2) Smoke test
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/v1/job-ingestions \
+  -H 'content-type: application/json' \
+  -H 'Idempotency-Key: docker-job-1' \
+  -d '{"source_type":"text","source_value":"Senior Backend Engineer\nResponsibilities:\n- Build reliable APIs\nRequirements:\n- Python\n- SQL"}'
+```
+
+### 3) Run quality gates in container
+
+```bash
+make docker-test
+```
+
+### 4) Stop services
+
+```bash
+make docker-down
+```
+
 ## Development Commands
 
 Show all available targets:

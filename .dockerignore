@@ -1,0 +1,13 @@
+.git
+.github
+.tmp
+**/__pycache__
+**/*.pyc
+**/*.pyo
+*.sqlite3
+*.swp
+*.swo
+*.DS_Store
+.pytest_cache
+.mypy_cache
+.ruff_cache

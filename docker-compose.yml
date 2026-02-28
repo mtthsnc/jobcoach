@@ -1,0 +1,27 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: jobcoach-api:dev
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000
+      JOBCOACH_DB_PATH: /data/jobcoach.sqlite3
+      MIGRATE_DB_PATH: /data/jobcoach.sqlite3
+      JOBCOACH_AUTO_MIGRATE: "1"
+    ports:
+      - "8000:8000"
+    volumes:
+      - jobcoach-data:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - code=$$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/v1/job-ingestions/contract-readiness-probe || true); [ "$$code" -ge 200 ] && [ "$$code" -lt 600 ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+volumes:
+  jobcoach-data:
