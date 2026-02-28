@@ -60,3 +60,15 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Implement M5 as a single bundled epic.
   - Start from dashboard/read-model outputs before hardening contracts and storage semantics.
+
+- Decision ID: `DEC-005`
+- Date (UTC): `2026-02-28`
+- Status: `accepted`
+- Context: Longitudinal progress metrics blend interview-session and feedback-report histories that may overlap in time and completeness; unstable ordering/fallback rules would create nondeterministic trajectory outputs.
+- Decision: Compute progress snapshots in deterministic timestamp/source order, with interview-score fallback derived from question history, and produce baseline/current/delta competency trends with stable tie-break sorting.
+- Consequences:
+  - Trend metrics are repeatable for fixed histories and safe to use as downstream planner inputs.
+  - Empty/partial histories return explicit zero-snapshot summaries rather than ad hoc null heuristics.
+- Alternatives considered:
+  - Use latest feedback report only for trend metrics.
+  - Use non-deterministic ranking of competencies when deltas tie.

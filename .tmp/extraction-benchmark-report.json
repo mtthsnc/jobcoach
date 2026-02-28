@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-28T22:25:38Z",
+  "generated_at": "2026-02-28T22:48:14Z",
   "fixtures_dir": "tests/unit/fixtures/job_extraction",
   "thresholds": {
     "role_title_accuracy": 0.9,

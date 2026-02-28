@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-28T22:25:38Z",
+  "generated_at": "2026-02-28T22:48:14Z",
   "fixtures_dir": "tests/unit/fixtures/interview_relevance",
   "thresholds": {
     "opening_coverage": 0.9,

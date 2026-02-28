@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: JobCoach API
   version: 0.1.0
-  description: M0-M4 contracts for job, candidate, interview session, and feedback workflows.
+  description: M0-M5 contracts for job, candidate, interview session, feedback, and trajectory workflows.
 servers:
   - url: https://api.jobcoach.local/v1
 security:
@@ -253,6 +253,42 @@ paths:
               schema:
                 $ref: '#/components/schemas/FeedbackReportResponse'
 
+  /trajectory-plans:
+    post:
+      summary: Create a trajectory plan for a candidate
+      operationId: createTrajectoryPlan
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTrajectoryPlanRequest'
+      responses:
+        '201':
+          description: Trajectory plan created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrajectoryPlanResponse'
+        '409':
+          description: Idempotency conflict
+
+  /trajectory-plans/{trajectory_plan_id}:
+    get:
+      summary: Get trajectory plan
+      operationId: getTrajectoryPlan
+      parameters:
+        - $ref: '#/components/parameters/TrajectoryPlanId'
+      responses:
+        '200':
+          description: Trajectory plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrajectoryPlanResponse'
+
   /taxonomy/normalize:
     post:
       summary: Normalize free-form terms into canonical taxonomy terms
@@ -344,6 +380,12 @@ components:
     FeedbackReportId:
       in: path
       name: feedback_report_id
+      required: true
+      schema:
+        type: string
+    TrajectoryPlanId:
+      in: path
+      name: trajectory_plan_id
       required: true
       schema:
         type: string
@@ -674,6 +716,25 @@ components:
         meta: { $ref: '#/components/schemas/Meta' }
         error: { type: 'null' }
 
+    CreateTrajectoryPlanRequest:
+      type: object
+      required: [candidate_id, target_role]
+      properties:
+        candidate_id: { type: string }
+        target_role: { type: string }
+        horizon_months:
+          type: integer
+          minimum: 1
+          maximum: 24
+
+    TrajectoryPlanResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/TrajectoryPlan'
+        meta: { $ref: '#/components/schemas/Meta' }
+        error: { type: 'null' }
+
     FeedbackReport:
       type: object
       required: [feedback_report_id, session_id, top_gaps, action_plan, overall_score, generated_at]
@@ -797,6 +858,128 @@ components:
         version:
           type: integer
           minimum: 1
+
+    TrajectoryPlan:
+      type: object
+      required: [trajectory_plan_id, candidate_id, target_role, milestones, generated_at]
+      properties:
+        trajectory_plan_id: { type: string }
+        candidate_id: { type: string }
+        target_role: { type: string }
+        horizon_months:
+          type: integer
+          minimum: 1
+          maximum: 24
+        role_readiness_score:
+          type: number
+          minimum: 0
+          maximum: 100
+        milestones:
+          type: array
+          items:
+            type: object
+            required: [name, target_date, metric]
+            properties:
+              name: { type: string }
+              target_date: { type: string, format: date }
+              metric: { type: string }
+        weekly_plan:
+          type: array
+          items:
+            type: object
+            required: [week, actions]
+            properties:
+              week:
+                type: integer
+                minimum: 1
+              actions:
+                type: array
+                items: { type: string }
+        progress_summary:
+          type: object
+          properties:
+            history_counts:
+              type: object
+              properties:
+                interview_sessions:
+                  type: integer
+                  minimum: 0
+                feedback_reports:
+                  type: integer
+                  minimum: 0
+                snapshots:
+                  type: integer
+                  minimum: 0
+            baseline:
+              type: object
+              properties:
+                timestamp:
+                  type: string
+                  format: date-time
+                source_type:
+                  type: string
+                source_id:
+                  type: string
+                overall_score:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+            current:
+              type: object
+              properties:
+                timestamp:
+                  type: string
+                  format: date-time
+                source_type:
+                  type: string
+                source_id:
+                  type: string
+                overall_score:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+            delta:
+              type: object
+              properties:
+                overall_score:
+                  type: number
+                  minimum: -100
+                  maximum: 100
+            competency_trends:
+              type: array
+              items:
+                type: object
+                required:
+                  [competency, baseline_score, current_score, delta_score, observation_count]
+                properties:
+                  competency:
+                    type: string
+                  baseline_score:
+                    type: number
+                    minimum: 0
+                    maximum: 100
+                  current_score:
+                    type: number
+                    minimum: 0
+                    maximum: 100
+                  delta_score:
+                    type: number
+                    minimum: -100
+                    maximum: 100
+                  observation_count:
+                    type: integer
+                    minimum: 0
+            top_improving_competencies:
+              type: array
+              items:
+                type: string
+            top_risk_competencies:
+              type: array
+              items:
+                type: string
+        generated_at:
+          type: string
+          format: date-time
 
     TaxonomyNormalizeRequest:
       type: object

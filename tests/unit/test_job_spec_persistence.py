@@ -1106,6 +1106,246 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertIsInstance(rewrites, list)
         self.assertGreaterEqual(len(rewrites), 1)
 
+    def test_create_and_get_trajectory_plan_persists_schema_valid_row(self) -> None:
+        _, candidate_id = self._create_candidate_profile()
+        target_role = "Senior Backend Engineer"
+
+        create_status, _, create_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+            },
+            headers={"Idempotency-Key": "trajectory-unit-create-001"},
+        )
+        self.assertEqual(create_status, 201, create_body)
+        self.assertIsNone(create_body["error"])
+        plan = create_body["data"]
+        trajectory_plan_id = plan["trajectory_plan_id"]
+        self.assertTrue(trajectory_plan_id)
+        self.assertEqual(plan["candidate_id"], candidate_id)
+        self.assertEqual(plan["target_role"], target_role)
+        progress_summary = plan.get("progress_summary")
+        self.assertIsInstance(progress_summary, dict)
+        assert isinstance(progress_summary, dict)
+        self.assertEqual(progress_summary.get("history_counts", {}).get("snapshots"), 0)
+        self.assertEqual(progress_summary.get("baseline"), {})
+        self.assertEqual(progress_summary.get("current"), {})
+        self.assertEqual(progress_summary.get("delta"), {})
+        self.assertEqual(progress_summary.get("competency_trends"), [])
+
+        validation = self.validator.validate("TrajectoryPlan", plan)
+        self.assertTrue(validation.is_valid, f"TrajectoryPlan validation failed: {validation.issues}")
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT trajectory_plan_id, candidate_id, target_role, idempotency_key, payload_json
+                FROM trajectory_plans
+                WHERE trajectory_plan_id = ?
+                """,
+                (trajectory_plan_id,),
+            ).fetchone()
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row[0], trajectory_plan_id)
+        self.assertEqual(row[1], candidate_id)
+        self.assertEqual(row[2], target_role)
+        self.assertEqual(row[3], "trajectory-unit-create-001")
+        payload = json.loads(str(row[4]))
+        self.assertEqual(payload.get("trajectory_plan_id"), trajectory_plan_id)
+        self.assertEqual(payload.get("candidate_id"), candidate_id)
+        self.assertEqual(payload.get("target_role"), target_role)
+
+        get_status, _, get_body = _request(
+            self.app,
+            method="GET",
+            path=f"/v1/trajectory-plans/{trajectory_plan_id}",
+        )
+        self.assertEqual(get_status, 200, get_body)
+        self.assertEqual(get_body["data"]["trajectory_plan_id"], trajectory_plan_id)
+        self.assertEqual(get_body["data"]["milestones"], plan.get("milestones"))
+        self.assertEqual(get_body["data"]["weekly_plan"], plan.get("weekly_plan"))
+        self.assertEqual(get_body["data"]["progress_summary"], plan.get("progress_summary"))
+
+    def test_trajectory_progress_summary_is_deterministic_for_fixed_history(self) -> None:
+        _, job_spec_id = self._create_job_spec()
+        _, candidate_id = self._create_candidate_profile()
+
+        create_session_status, _, create_session_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/interview-sessions",
+            body={"job_spec_id": job_spec_id, "candidate_id": candidate_id},
+        )
+        self.assertEqual(create_session_status, 201, create_session_body)
+        session_data = create_session_body["data"]
+        session_id = session_data["session_id"]
+        first_question = session_data["questions"][0]
+
+        respond_status, _, respond_body = _request(
+            self.app,
+            method="POST",
+            path=f"/v1/interview-sessions/{session_id}/responses",
+            body={
+                "question_id": first_question["question_id"],
+                "response": "I led a migration that improved uptime to 99.9% and reduced incidents by 30%.",
+            },
+            headers={"Idempotency-Key": "trajectory-progress-seed-response-001"},
+        )
+        self.assertEqual(respond_status, 200, respond_body)
+
+        feedback_status, _, feedback_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/feedback-reports",
+            body={"session_id": session_id},
+            headers={"Idempotency-Key": "trajectory-progress-seed-feedback-001"},
+        )
+        self.assertEqual(feedback_status, 201, feedback_body)
+
+        first_plan_status, _, first_plan_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/trajectory-plans",
+            body={"candidate_id": candidate_id, "target_role": "Senior Backend Engineer"},
+            headers={"Idempotency-Key": "trajectory-progress-deterministic-001"},
+        )
+        self.assertEqual(first_plan_status, 201, first_plan_body)
+        first_summary = first_plan_body["data"].get("progress_summary")
+        self.assertIsInstance(first_summary, dict)
+        assert isinstance(first_summary, dict)
+
+        second_plan_status, _, second_plan_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/trajectory-plans",
+            body={"candidate_id": candidate_id, "target_role": "Senior Backend Engineer"},
+            headers={"Idempotency-Key": "trajectory-progress-deterministic-002"},
+        )
+        self.assertEqual(second_plan_status, 201, second_plan_body)
+        second_summary = second_plan_body["data"].get("progress_summary")
+        self.assertEqual(second_summary, first_summary)
+
+        history_counts = first_summary.get("history_counts")
+        self.assertIsInstance(history_counts, dict)
+        assert isinstance(history_counts, dict)
+        self.assertEqual(history_counts.get("interview_sessions"), 1)
+        self.assertEqual(history_counts.get("feedback_reports"), 1)
+        self.assertEqual(history_counts.get("snapshots"), 2)
+
+        baseline = first_summary.get("baseline")
+        current = first_summary.get("current")
+        delta = first_summary.get("delta")
+        self.assertIsInstance(baseline, dict)
+        self.assertIsInstance(current, dict)
+        self.assertIsInstance(delta, dict)
+        assert isinstance(baseline, dict)
+        assert isinstance(current, dict)
+        assert isinstance(delta, dict)
+        self.assertIn(baseline.get("source_type"), {"interview_session", "feedback_report"})
+        self.assertIn(current.get("source_type"), {"interview_session", "feedback_report"})
+        baseline_overall = baseline.get("overall_score")
+        current_overall = current.get("overall_score")
+        self.assertIsInstance(baseline_overall, (int, float))
+        self.assertIsInstance(current_overall, (int, float))
+        expected_delta = round(float(current_overall) - float(baseline_overall), 2)
+        self.assertEqual(delta.get("overall_score"), expected_delta)
+
+        competency_trends = first_summary.get("competency_trends")
+        self.assertIsInstance(competency_trends, list)
+        self.assertGreaterEqual(len(competency_trends), 1)
+        for entry in competency_trends:
+            self.assertIsInstance(entry.get("competency"), str)
+            self.assertIsInstance(entry.get("baseline_score"), (int, float))
+            self.assertIsInstance(entry.get("current_score"), (int, float))
+            self.assertIsInstance(entry.get("delta_score"), (int, float))
+            self.assertIsInstance(entry.get("observation_count"), int)
+
+    def test_trajectory_plan_idempotency_replay_and_conflict(self) -> None:
+        _, candidate_id = self._create_candidate_profile()
+
+        first_status, _, first_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Staff Backend Engineer",
+            },
+            headers={"Idempotency-Key": "trajectory-unit-idempotency-001"},
+        )
+        self.assertEqual(first_status, 201, first_body)
+        first_plan_id = first_body["data"]["trajectory_plan_id"]
+
+        replay_status, _, replay_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Staff Backend Engineer",
+            },
+            headers={"Idempotency-Key": "trajectory-unit-idempotency-001"},
+        )
+        self.assertEqual(replay_status, 201, replay_body)
+        self.assertEqual(replay_body["data"]["trajectory_plan_id"], first_plan_id)
+
+        conflict_status, _, conflict_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Principal Backend Engineer",
+            },
+            headers={"Idempotency-Key": "trajectory-unit-idempotency-001"},
+        )
+        self.assertEqual(conflict_status, 409, conflict_body)
+        self.assertEqual(conflict_body["error"]["code"], "idempotency_key_conflict")
+
+    def test_trajectory_plan_endpoints_validate_request_shape(self) -> None:
+        _, candidate_id = self._create_candidate_profile()
+
+        missing_header_status, _, missing_header_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/trajectory-plans",
+            body={"candidate_id": candidate_id, "target_role": "Backend Engineer"},
+        )
+        self.assertEqual(missing_header_status, 400, missing_header_body)
+        self.assertEqual(missing_header_body["error"]["code"], "invalid_request")
+
+        invalid_body_status, _, invalid_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/trajectory-plans",
+            body={},
+            headers={"Idempotency-Key": "trajectory-unit-invalid-body-001"},
+        )
+        self.assertEqual(invalid_body_status, 400, invalid_body)
+        self.assertEqual(invalid_body["error"]["code"], "invalid_request")
+
+        missing_candidate_status, _, missing_candidate_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/trajectory-plans",
+            body={"candidate_id": "cand_missing_unit_trajectory_001", "target_role": "Backend Engineer"},
+            headers={"Idempotency-Key": "trajectory-unit-missing-candidate-001"},
+        )
+        self.assertEqual(missing_candidate_status, 404, missing_candidate_body)
+        self.assertEqual(missing_candidate_body["error"]["code"], "not_found")
+
+        get_missing_status, _, get_missing_body = _request(
+            self.app,
+            method="GET",
+            path="/v1/trajectory-plans/tp_missing_unit_001",
+        )
+        self.assertEqual(get_missing_status, 404, get_missing_body)
+        self.assertEqual(get_missing_body["error"]["code"], "not_found")
+
     def test_post_and_get_candidate_ingestion_persists_row(self) -> None:
         payload = {
             "candidate_id": "cand_unit_001",

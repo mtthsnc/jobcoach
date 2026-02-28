@@ -80,6 +80,12 @@ class FeedbackReportCreateResult:
     current_version: int | None
 
 
+@dataclass(frozen=True)
+class TrajectoryPlanCreateResult:
+    status: str
+    plan: dict[str, Any] | None
+
+
 class SQLiteJobIngestionRepository:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = str(db_path)
@@ -598,6 +604,128 @@ class SQLiteJobIngestionRepository:
 
         return _row_to_feedback_report(row) if row is not None else None
 
+    def create_or_get_trajectory_plan(
+        self,
+        *,
+        idempotency_key: str,
+        request_payload: dict[str, Any],
+        trajectory_plan: dict[str, Any],
+    ) -> TrajectoryPlanCreateResult:
+        trajectory_plan_id = str(trajectory_plan.get("trajectory_plan_id", "")).strip()
+        candidate_id = str(trajectory_plan.get("candidate_id", "")).strip()
+        target_role = str(trajectory_plan.get("target_role", "")).strip()
+        if not trajectory_plan_id or not candidate_id or not target_role:
+            raise ValueError(
+                "trajectory_plan must include non-empty trajectory_plan_id, candidate_id, and target_role"
+            )
+
+        request_json = _canonical_json(request_payload)
+
+        with closing(self._connect()) as connection:
+            with connection:
+                candidate_row = connection.execute(
+                    "SELECT 1 FROM candidate_profiles WHERE candidate_id = ?",
+                    (candidate_id,),
+                ).fetchone()
+                if candidate_row is None:
+                    return TrajectoryPlanCreateResult(status="candidate_not_found", plan=None)
+
+                existing_row = connection.execute(
+                    """
+                    SELECT request_json, payload_json
+                    FROM trajectory_plans
+                    WHERE idempotency_key = ?
+                    """,
+                    (idempotency_key,),
+                ).fetchone()
+                if existing_row is not None:
+                    existing_request_json = str(existing_row["request_json"])
+                    existing_payload = _decode_json_object(str(existing_row["payload_json"]))
+                    if existing_request_json == request_json:
+                        return TrajectoryPlanCreateResult(status="idempotent_replay", plan=existing_payload)
+                    return TrajectoryPlanCreateResult(status="idempotency_conflict", plan=existing_payload)
+
+                payload_json = _canonical_json(trajectory_plan)
+                connection.execute(
+                    """
+                    INSERT INTO trajectory_plans (
+                        trajectory_plan_id,
+                        candidate_id,
+                        target_role,
+                        idempotency_key,
+                        request_json,
+                        payload_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        trajectory_plan_id,
+                        candidate_id,
+                        target_role,
+                        idempotency_key,
+                        request_json,
+                        payload_json,
+                    ),
+                )
+
+                row = connection.execute(
+                    "SELECT payload_json FROM trajectory_plans WHERE trajectory_plan_id = ?",
+                    (trajectory_plan_id,),
+                ).fetchone()
+                if row is None:
+                    return TrajectoryPlanCreateResult(status="not_found", plan=None)
+
+                return TrajectoryPlanCreateResult(status="created", plan=_decode_json_object(str(row["payload_json"])))
+
+    def get_trajectory_plan_by_id(self, trajectory_plan_id: str) -> dict[str, Any] | None:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM trajectory_plans WHERE trajectory_plan_id = ?",
+                (trajectory_plan_id,),
+            ).fetchone()
+
+        return _row_to_trajectory_plan(row) if row is not None else None
+
+    def list_interview_sessions_for_candidate(self, *, candidate_id: str) -> list[dict[str, Any]]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM interview_sessions
+                WHERE candidate_id = ?
+                ORDER BY created_at ASC, session_id ASC
+                """,
+                (candidate_id,),
+            ).fetchall()
+
+        sessions: list[dict[str, Any]] = []
+        for row in rows:
+            session = _row_to_interview_session(row)
+            if session is not None:
+                sessions.append(session)
+        return sessions
+
+    def list_feedback_reports_for_candidate(self, *, candidate_id: str) -> list[dict[str, Any]]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT fr.payload_json, fr.created_at
+                FROM feedback_reports fr
+                INNER JOIN interview_sessions isess ON isess.session_id = fr.session_id
+                WHERE isess.candidate_id = ?
+                ORDER BY fr.created_at ASC, fr.feedback_report_id ASC
+                """,
+                (candidate_id,),
+            ).fetchall()
+
+        reports: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _decode_json_object(str(row["payload_json"]))
+            if "generated_at" not in payload:
+                payload["generated_at"] = row["created_at"]
+            reports.append(payload)
+        return reports
+
     def apply_interview_response(
         self,
         *,
@@ -1072,6 +1200,12 @@ def _row_to_interview_session(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 
 def _row_to_feedback_report(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return _decode_json_object(str(row["payload_json"]))
+
+
+def _row_to_trajectory_plan(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
     return _decode_json_object(str(row["payload_json"]))

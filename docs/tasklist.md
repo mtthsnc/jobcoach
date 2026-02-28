@@ -45,8 +45,8 @@ Status legend: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`
 | M4-005 | DONE | P1 | M4 | Persist/retrieve feedback reports with idempotent generation semantics and optimistic versioning | M4-001,M4-002,M4-003,M4-004 | Storage layer supports idempotent report creation, replay, and conflict handling |
 | M4-006 | DONE | P0 | M4 | Add feedback quality benchmark + threshold gates for CI/local | M4-005,M0-006 | Benchmark report emitted and CI fails on quality/coverage regressions |
 | M5-PLAN-001 | DONE | P0 | M5 | Define executable M5 backlog with dependencies and acceptance criteria | M4-006 | M5 task graph committed and NEXT pointer targets first executable M5 task |
-| M5-001 | TODO | P0 | M5 | Add `TrajectoryPlan` orchestration contract endpoints (`POST /trajectory-plans`, `GET /trajectory-plans/{id}`) + storage migration | M5-PLAN-001 | OpenAPI + schema fixtures + SQL migration for trajectory plan persistence pass contract and migration checks |
-| M5-002 | TODO | P0 | M5 | Build deterministic longitudinal progress aggregator from interview sessions and feedback report history | M5-001 | Baseline/current/delta trend metrics are deterministic and regression-tested on fixed histories |
+| M5-001 | DONE | P0 | M5 | Add `TrajectoryPlan` orchestration contract endpoints (`POST /trajectory-plans`, `GET /trajectory-plans/{id}`) + storage migration | M5-PLAN-001 | OpenAPI + schema fixtures + SQL migration for trajectory plan persistence pass contract and migration checks |
+| M5-002 | DONE | P0 | M5 | Build deterministic longitudinal progress aggregator from interview sessions and feedback report history | M5-001 | Baseline/current/delta trend metrics are deterministic and regression-tested on fixed histories |
 | M5-003 | TODO | P0 | M5 | Implement trajectory milestone + weekly-plan generator from trend metrics and target-role competency gaps | M5-002 | Generated `TrajectoryPlan` milestones/weekly plan are schema-valid, date-ordered, and evidence-linked |
 | M5-004 | TODO | P1 | M5 | Persist/retrieve trajectory plans with idempotent generation semantics and optimistic version checks | M5-001,M5-003 | Storage supports idempotent replay, regeneration progression, and expected-version conflict behavior |
 | M5-005 | TODO | P1 | M5 | Add candidate progress dashboard endpoint with competency trend cards and readiness signals | M5-002,M5-004 | Dashboard returns stable trend math and surfaces top-improving/top-risk competencies |
@@ -54,8 +54,8 @@ Status legend: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`
 
 ## NEXT
 
-- `NEXT-1`: Execute `M5-001` trajectory-plan contracts/storage foundation.
-- `NEXT-2`: Execute `M5-002` deterministic progress aggregation after contracts land.
+- `NEXT-1`: Execute `M5-003` trajectory milestone/weekly-plan generator once trend metrics are available.
+- `NEXT-2`: Execute `M5-004` persistence/versioning hardening for regenerated trajectory plans.
 
 ## Backlog (Future Milestones)
 

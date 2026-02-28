@@ -280,6 +280,71 @@
             }
           }
         },
+        "progress_summary": {
+          "type": "object",
+          "properties": {
+            "history_counts": {
+              "type": "object",
+              "properties": {
+                "interview_sessions": { "type": "integer", "minimum": 0 },
+                "feedback_reports": { "type": "integer", "minimum": 0 },
+                "snapshots": { "type": "integer", "minimum": 0 }
+              }
+            },
+            "baseline": {
+              "type": "object",
+              "properties": {
+                "timestamp": { "type": "string", "format": "date-time" },
+                "source_type": { "type": "string" },
+                "source_id": { "type": "string" },
+                "overall_score": { "type": "number", "minimum": 0, "maximum": 100 }
+              }
+            },
+            "current": {
+              "type": "object",
+              "properties": {
+                "timestamp": { "type": "string", "format": "date-time" },
+                "source_type": { "type": "string" },
+                "source_id": { "type": "string" },
+                "overall_score": { "type": "number", "minimum": 0, "maximum": 100 }
+              }
+            },
+            "delta": {
+              "type": "object",
+              "properties": {
+                "overall_score": { "type": "number", "minimum": -100, "maximum": 100 }
+              }
+            },
+            "competency_trends": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "competency",
+                  "baseline_score",
+                  "current_score",
+                  "delta_score",
+                  "observation_count"
+                ],
+                "properties": {
+                  "competency": { "type": "string" },
+                  "baseline_score": { "type": "number", "minimum": 0, "maximum": 100 },
+                  "current_score": { "type": "number", "minimum": 0, "maximum": 100 },
+                  "delta_score": { "type": "number", "minimum": -100, "maximum": 100 },
+                  "observation_count": { "type": "integer", "minimum": 0 }
+                }
+              }
+            },
+            "top_improving_competencies": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "top_risk_competencies": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
         "generated_at": { "type": "string", "format": "date-time" }
       }
     }

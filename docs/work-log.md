@@ -1223,3 +1223,118 @@ Use UTC timestamps. Append entries only.
   - No blockers encountered.
 - Next pointer:
   - Execute `M5-001` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T22:31:10Z
+- Execute `M5-001` trajectory-plan contracts/storage foundation.
+- Task IDs: M5-001
+- Changes made:
+  - Extended OpenAPI contract in `schemas/openapi/openapi-m0-m2.yaml` with:
+    - `POST /trajectory-plans` (idempotent create),
+    - `GET /trajectory-plans/{trajectory_plan_id}` (fetch by id),
+    - `CreateTrajectoryPlanRequest`, `TrajectoryPlanResponse`, and `TrajectoryPlan` schemas.
+  - Added migration `infra/migrations/008_m5_trajectory_plans.sql`:
+    - created `trajectory_plans` table with `idempotency_key` uniqueness,
+    - added candidate and target-role retrieval indexes.
+  - Implemented API/repository flow for trajectory plans:
+    - route handling + payload validation + deterministic trajectory payload generation in `apps/api-gateway/api_gateway/app.py`,
+    - persistence/replay/conflict retrieval methods in `apps/api-gateway/api_gateway/repository.py`.
+  - Added contract coverage in `tests/contracts/test_job_ingestions_api_contract.py` for:
+    - create/get happy path,
+    - idempotent replay and conflict,
+    - validation errors and not-found retrieval.
+  - Added unit coverage in `tests/unit/test_job_spec_persistence.py` for:
+    - schema-valid persistence and retrieval,
+    - idempotency replay/conflict behavior,
+    - request-shape and not-found validation behavior.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make test`
+  - `make contract-test`
+- Blockers / risks:
+  - One transient validation misstep: `make migrate-up` and `make migrate-down` were executed in parallel once and conflicted on the same SQLite file; rerunning sequentially resolved it.
+- Next pointer:
+  - Close `M5-001` in planning docs and advance pointer to `M5-002`.
+
+- END
+- 2026-02-28T22:41:11Z
+- Execute `M5-001` trajectory-plan contracts/storage foundation.
+- Task IDs: M5-001
+- Changes made:
+  - Marked `M5-001` as `DONE` in `docs/tasklist.md`.
+  - Updated `docs/tasklist.md` NEXT queue to prioritize `M5-002` then `M5-003`.
+  - Updated `docs/NEXT_ACTION.md` active pointer to `M5-002` with deterministic aggregation implementation steps.
+- Validation evidence:
+  - `make test`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make contract-test`
+- Blockers / risks:
+  - No remaining blockers for `M5-001`.
+- Next pointer:
+  - Execute `M5-002` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T22:42:05Z
+- Execute `M5-002` deterministic longitudinal progress aggregation.
+- Task IDs: M5-002
+- Changes made:
+  - Added deterministic progress aggregation module `services/progress-tracking/aggregator.py`:
+    - combines interview-session and feedback-report history into ordered snapshots,
+    - computes baseline/current/delta overall metrics,
+    - emits competency trend entries with stable tie-break ordering and observation counts,
+    - includes fallback derivation from question-level scores when session score maps are empty.
+  - Integrated aggregation into trajectory generation flow in `apps/api-gateway/api_gateway/app.py`:
+    - load progress aggregator service at app startup,
+    - collect candidate-scoped interview/feedback history before trajectory generation,
+    - attach `progress_summary` to generated `TrajectoryPlan`,
+    - set `role_readiness_score` from current aggregated overall when available.
+  - Extended repository history access in `apps/api-gateway/api_gateway/repository.py`:
+    - `list_interview_sessions_for_candidate`,
+    - `list_feedback_reports_for_candidate`.
+  - Updated trajectory schema contract surfaces to document progress summary payload shape:
+    - `schemas/openapi/openapi-m0-m2.yaml`,
+    - `schemas/jsonschema/core-schemas.json`.
+  - Added regression and integration coverage:
+    - `tests/unit/test_progress_aggregator.py` for deterministic fixed-history outputs and fallback behavior,
+    - expanded trajectory plan assertions in `tests/unit/test_job_spec_persistence.py`,
+    - expanded trajectory contract checks in `tests/contracts/test_job_ingestions_api_contract.py`.
+  - Logged decision `DEC-005` in `docs/decision-log.md` for deterministic snapshot ordering/fallback rules.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_progress_aggregator.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make test`
+  - `make contract-test`
+- Blockers / risks:
+  - Initial progress-summary representation (`baseline/current/delta = null`) conflicted with object-typed schema checks; corrected to deterministic empty objects for zero-snapshot histories.
+  - One contract assertion initially assumed zero prior history for a shared candidate; corrected to non-negative deterministic count checks.
+- Next pointer:
+  - Close `M5-002` in planning docs and advance pointer to `M5-003`.
+
+- END
+- 2026-02-28T22:48:22Z
+- Execute `M5-002` deterministic longitudinal progress aggregation.
+- Task IDs: M5-002
+- Changes made:
+  - Marked `M5-002` as `DONE` in `docs/tasklist.md`.
+  - Updated `docs/tasklist.md` NEXT queue to prioritize `M5-003` then `M5-004`.
+  - Updated `docs/NEXT_ACTION.md` active pointer to `M5-003` with milestone/weekly-plan generator implementation steps.
+- Validation evidence:
+  - `make test`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make contract-test`
+- Blockers / risks:
+  - No remaining blockers for `M5-002`.
+- Next pointer:
+  - Execute `M5-003` from `docs/NEXT_ACTION.md`.

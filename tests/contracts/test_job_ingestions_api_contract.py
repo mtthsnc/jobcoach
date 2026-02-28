@@ -232,6 +232,7 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertIn("candidate_ingestions", table_names)
         self.assertIn("interview_sessions", table_names)
         self.assertIn("feedback_reports", table_names)
+        self.assertIn("trajectory_plans", table_names)
 
     def test_post_and_get_job_ingestion_contract(self) -> None:
         payload = _load_fixture("create_request.json")
@@ -1090,6 +1091,176 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(get_missing_status, 404, get_missing_body)
         self.assertEqual(get_missing_body.get("error", {}).get("code"), "not_found")
 
+    def test_create_and_get_trajectory_plan_contract(self) -> None:
+        candidate_id = self._create_candidate_entity_for_interview()
+        target_role = "Senior Backend Engineer"
+        idempotency_key = f"trajectory-create-{uuid.uuid4()}"
+
+        create_status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+            },
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        self.assertEqual(create_status, 201, create_body)
+        data = create_body.get("data", {})
+        trajectory_plan_id = data.get("trajectory_plan_id")
+        self.assertIsInstance(trajectory_plan_id, str)
+        self.assertTrue(trajectory_plan_id)
+        assert isinstance(trajectory_plan_id, str)
+        self.assertEqual(data.get("candidate_id"), candidate_id)
+        self.assertEqual(data.get("target_role"), target_role)
+        self.assertIsInstance(data.get("milestones"), list)
+        self.assertGreaterEqual(len(data.get("milestones", [])), 1)
+        progress_summary = data.get("progress_summary")
+        self.assertIsInstance(progress_summary, dict)
+        assert isinstance(progress_summary, dict)
+        history_counts = progress_summary.get("history_counts")
+        self.assertIsInstance(history_counts, dict)
+        assert isinstance(history_counts, dict)
+        interview_count = history_counts.get("interview_sessions")
+        feedback_count = history_counts.get("feedback_reports")
+        snapshot_count = history_counts.get("snapshots")
+        self.assertIsInstance(interview_count, int)
+        self.assertIsInstance(feedback_count, int)
+        self.assertIsInstance(snapshot_count, int)
+        assert isinstance(interview_count, int)
+        assert isinstance(feedback_count, int)
+        assert isinstance(snapshot_count, int)
+        self.assertGreaterEqual(interview_count, 0)
+        self.assertGreaterEqual(feedback_count, 0)
+        self.assertGreaterEqual(snapshot_count, 0)
+        baseline = progress_summary.get("baseline")
+        current = progress_summary.get("current")
+        delta = progress_summary.get("delta")
+        self.assertIsInstance(baseline, dict)
+        self.assertIsInstance(current, dict)
+        self.assertIsInstance(delta, dict)
+        competency_trends = progress_summary.get("competency_trends")
+        self.assertIsInstance(competency_trends, list)
+        first_milestone = data.get("milestones", [None])[0]
+        self.assertIsInstance(first_milestone, dict)
+        assert isinstance(first_milestone, dict)
+        self.assertTrue(str(first_milestone.get("name", "")).strip())
+        self.assertTrue(str(first_milestone.get("target_date", "")).strip())
+        self.assertTrue(str(first_milestone.get("metric", "")).strip())
+
+        get_status, get_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/trajectory-plans/{trajectory_plan_id}",
+        )
+        self.assertEqual(get_status, 200, get_body)
+        self.assertEqual(get_body.get("data", {}).get("trajectory_plan_id"), trajectory_plan_id)
+        self.assertEqual(get_body.get("data", {}).get("candidate_id"), candidate_id)
+        self.assertEqual(get_body.get("data", {}).get("target_role"), target_role)
+        self.assertEqual(get_body.get("data", {}).get("milestones"), data.get("milestones"))
+        self.assertEqual(get_body.get("data", {}).get("weekly_plan"), data.get("weekly_plan"))
+        self.assertEqual(get_body.get("data", {}).get("progress_summary"), data.get("progress_summary"))
+
+        self._assert_trajectory_plan_row_persisted(
+            trajectory_plan_id=trajectory_plan_id,
+            candidate_id=candidate_id,
+            target_role=target_role,
+            idempotency_key=idempotency_key,
+        )
+
+    def test_trajectory_plan_idempotency_conflict_contract(self) -> None:
+        candidate_id = self._create_candidate_entity_for_interview()
+        shared_key = f"trajectory-idempotency-{uuid.uuid4()}"
+
+        first_status, first_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Staff Backend Engineer",
+            },
+            headers={"Idempotency-Key": shared_key},
+        )
+        self.assertEqual(first_status, 201, first_body)
+        first_plan_id = first_body.get("data", {}).get("trajectory_plan_id")
+        self.assertIsInstance(first_plan_id, str)
+        self.assertTrue(first_plan_id)
+        assert isinstance(first_plan_id, str)
+
+        replay_status, replay_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Staff Backend Engineer",
+            },
+            headers={"Idempotency-Key": shared_key},
+        )
+        self.assertEqual(replay_status, 201, replay_body)
+        self.assertEqual(replay_body.get("data", {}).get("trajectory_plan_id"), first_plan_id)
+
+        conflict_status, conflict_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Principal Backend Engineer",
+            },
+            headers={"Idempotency-Key": shared_key},
+        )
+        self.assertEqual(conflict_status, 409, conflict_body)
+        self.assertEqual(conflict_body.get("error", {}).get("code"), "idempotency_key_conflict")
+
+    def test_trajectory_plan_validation_and_not_found_contract(self) -> None:
+        candidate_id = self._create_candidate_entity_for_interview()
+
+        missing_header_status, missing_header_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Backend Engineer",
+            },
+        )
+        self.assertEqual(missing_header_status, 400, missing_header_body)
+        self.assertEqual(missing_header_body.get("error", {}).get("code"), "invalid_request")
+
+        invalid_body_status, invalid_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={},
+            headers={"Idempotency-Key": "trajectory-invalid-body-001"},
+        )
+        self.assertEqual(invalid_body_status, 400, invalid_body)
+        self.assertEqual(invalid_body.get("error", {}).get("code"), "invalid_request")
+
+        missing_candidate_status, missing_candidate_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={
+                "candidate_id": "cand_missing_trajectory_001",
+                "target_role": "Backend Engineer",
+            },
+            headers={"Idempotency-Key": "trajectory-missing-candidate-001"},
+        )
+        self.assertEqual(missing_candidate_status, 404, missing_candidate_body)
+        self.assertEqual(missing_candidate_body.get("error", {}).get("code"), "not_found")
+
+        get_missing_status, get_missing_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/trajectory-plans/tp_missing_001",
+        )
+        self.assertEqual(get_missing_status, 404, get_missing_body)
+        self.assertEqual(get_missing_body.get("error", {}).get("code"), "not_found")
+
     def _create_interview_session_entity_for_feedback(self) -> str:
         job_spec_id = self._create_job_spec_entity_for_interview()
         candidate_id = self._create_candidate_entity_for_interview()
@@ -1427,6 +1598,37 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual([entry.get("day") for entry in payload.get("action_plan", [])], list(range(1, 31)))
         self.assertEqual(int(row[4]), int(payload.get("version", 0)))
         self.assertEqual(payload.get("supersedes_feedback_report_id"), row[5])
+
+    def _assert_trajectory_plan_row_persisted(
+        self,
+        *,
+        trajectory_plan_id: str,
+        candidate_id: str,
+        target_role: str,
+        idempotency_key: str,
+    ) -> None:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT trajectory_plan_id, candidate_id, target_role, idempotency_key, payload_json
+                FROM trajectory_plans
+                WHERE trajectory_plan_id = ?
+                """,
+                (trajectory_plan_id,),
+            ).fetchone()
+
+        self.assertIsNotNone(row, f"Trajectory plan row missing for trajectory_plan_id={trajectory_plan_id}")
+        assert row is not None
+        self.assertEqual(row[0], trajectory_plan_id)
+        self.assertEqual(row[1], candidate_id)
+        self.assertEqual(row[2], target_role)
+        self.assertEqual(row[3], idempotency_key)
+        payload = json.loads(str(row[4]))
+        self.assertEqual(payload.get("trajectory_plan_id"), trajectory_plan_id)
+        self.assertEqual(payload.get("candidate_id"), candidate_id)
+        self.assertEqual(payload.get("target_role"), target_role)
+        self.assertIsInstance(payload.get("milestones"), list)
+        self.assertGreaterEqual(len(payload.get("milestones", [])), 1)
 
     def _assert_ingestion_accepted_response(self, body: dict) -> str:
         self.assertIsInstance(body, dict)

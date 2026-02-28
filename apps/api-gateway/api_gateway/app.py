@@ -5,7 +5,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
@@ -24,9 +24,11 @@ CANDIDATE_PROFILE_PARSER_PATH = ROOT_DIR / "services" / "candidate-profile" / "p
 CANDIDATE_STORYBANK_PATH = ROOT_DIR / "services" / "candidate-profile" / "storybank.py"
 INTERVIEW_PLANNER_PATH = ROOT_DIR / "services" / "interview-engine" / "planner.py"
 INTERVIEW_FOLLOWUP_PATH = ROOT_DIR / "services" / "interview-engine" / "followup.py"
+PROGRESS_AGGREGATOR_PATH = ROOT_DIR / "services" / "progress-tracking" / "aggregator.py"
 INTERVIEW_ROUTE_PREFIX = "/v1/interview-sessions/"
 INTERVIEW_RESPONSES_SUFFIX = "/responses"
 FEEDBACK_ROUTE_PREFIX = "/v1/feedback-reports/"
+TRAJECTORY_ROUTE_PREFIX = "/v1/trajectory-plans/"
 JOB_SPEC_ROUTE_PREFIX = "/v1/job-specs/"
 JOB_SPEC_REVIEW_ROUTE_SUFFIX = "/review"
 CANDIDATE_ROUTE_PREFIX = "/v1/candidates/"
@@ -67,6 +69,7 @@ _CANDIDATE_PROFILE_MODULE = _load_module("candidate_profile_parser", CANDIDATE_P
 _CANDIDATE_STORYBANK_MODULE = _load_module("candidate_storybank_generator", CANDIDATE_STORYBANK_PATH)
 _INTERVIEW_PLANNER_MODULE = _load_module("interview_question_planner", INTERVIEW_PLANNER_PATH)
 _INTERVIEW_FOLLOWUP_MODULE = _load_module("interview_followup_selector", INTERVIEW_FOLLOWUP_PATH)
+_PROGRESS_AGGREGATOR_MODULE = _load_module("progress_aggregator", PROGRESS_AGGREGATOR_PATH)
 
 
 class JobIngestionAPI:
@@ -81,6 +84,7 @@ class JobIngestionAPI:
         candidate_storybank_generator: Any,
         interview_question_planner: Any,
         interview_followup_selector: Any,
+        progress_aggregator: Any,
     ) -> None:
         self._repository = repository
         self._extraction_worker = extraction_worker
@@ -90,6 +94,7 @@ class JobIngestionAPI:
         self._candidate_storybank_generator = candidate_storybank_generator
         self._interview_question_planner = interview_question_planner
         self._interview_followup_selector = interview_followup_selector
+        self._progress_aggregator = progress_aggregator
 
     def __call__(self, environ: dict[str, Any], start_response: Any) -> list[bytes]:
         method = str(environ.get("REQUEST_METHOD", "")).upper()
@@ -234,6 +239,37 @@ class JobIngestionAPI:
                 start_response,
                 request_id=request_id,
                 feedback_report_id=feedback_report_id,
+            )
+
+        if path == "/v1/trajectory-plans":
+            if method != "POST":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "POST")],
+                )
+            return self._handle_create_trajectory_plan(environ, start_response, request_id=request_id)
+
+        if path.startswith(TRAJECTORY_ROUTE_PREFIX):
+            trajectory_plan_id = unquote(path[len(TRAJECTORY_ROUTE_PREFIX) :])
+            if not trajectory_plan_id or "/" in trajectory_plan_id:
+                return _json_response(
+                    start_response,
+                    HTTPStatus.NOT_FOUND,
+                    _error_envelope(request_id=request_id, code="not_found", message="Resource not found", retryable=False),
+                )
+            if method != "GET":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "GET")],
+                )
+            return self._handle_get_trajectory_plan(
+                start_response,
+                request_id=request_id,
+                trajectory_plan_id=trajectory_plan_id,
             )
 
         if path.startswith(CANDIDATE_ROUTE_PREFIX) and path.endswith(CANDIDATE_PROFILE_SUFFIX):
@@ -991,6 +1027,168 @@ class JobIngestionAPI:
             _success_envelope(request_id=request_id, data=payload),
         )
 
+    def _handle_create_trajectory_plan(
+        self,
+        environ: dict[str, Any],
+        start_response: Any,
+        *,
+        request_id: str,
+    ) -> list[bytes]:
+        idempotency_key = str(environ.get("HTTP_IDEMPOTENCY_KEY", "")).strip()
+        if not idempotency_key:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Idempotency-Key header is required",
+                    retryable=False,
+                    details=[{"field": "Idempotency-Key", "reason": "required"}],
+                ),
+            )
+
+        payload, payload_error = _parse_json_payload(environ)
+        if payload_error:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message=payload_error,
+                    retryable=False,
+                ),
+            )
+
+        validation_errors = _validate_create_trajectory_plan_payload(payload)
+        if validation_errors:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Request body validation failed",
+                    retryable=False,
+                    details=validation_errors,
+                ),
+            )
+
+        candidate_id = str(payload["candidate_id"])
+        target_role = str(payload["target_role"])
+
+        candidate_profile = self._repository.get_candidate_profile_by_id(candidate_id)
+        if candidate_profile is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Candidate profile not found",
+                    retryable=False,
+                ),
+            )
+
+        interview_history = self._repository.list_interview_sessions_for_candidate(candidate_id=candidate_id)
+        feedback_history = self._repository.list_feedback_reports_for_candidate(candidate_id=candidate_id)
+        progress_summary = self._progress_aggregator.aggregate(
+            interview_sessions=interview_history,
+            feedback_reports=feedback_history,
+        )
+
+        trajectory_plan_payload = self._build_trajectory_plan_payload(
+            candidate_id=candidate_id,
+            target_role=target_role,
+            progress_summary=progress_summary,
+        )
+        validation = self._schema_validator.validate("TrajectoryPlan", trajectory_plan_payload)
+        if not validation.is_valid:
+            issue_summary = [{"path": issue.path, "message": issue.message} for issue in validation.issues]
+            return _json_response(
+                start_response,
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_trajectory_plan",
+                    message="Generated TrajectoryPlan failed schema validation",
+                    retryable=False,
+                    details=issue_summary,
+                ),
+            )
+
+        create_result = self._repository.create_or_get_trajectory_plan(
+            idempotency_key=idempotency_key,
+            request_payload=payload,
+            trajectory_plan=trajectory_plan_payload,
+        )
+        if create_result.status == "candidate_not_found":
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Candidate profile not found",
+                    retryable=False,
+                ),
+            )
+        if create_result.status == "idempotency_conflict":
+            return _json_response(
+                start_response,
+                HTTPStatus.CONFLICT,
+                _error_envelope(
+                    request_id=request_id,
+                    code="idempotency_key_conflict",
+                    message="Idempotency-Key is already associated with a different request",
+                    retryable=False,
+                ),
+            )
+        if create_result.plan is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                _error_envelope(
+                    request_id=request_id,
+                    code="internal_error",
+                    message="Trajectory plan could not be persisted",
+                    retryable=True,
+                ),
+            )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.CREATED,
+            _success_envelope(request_id=request_id, data=create_result.plan),
+        )
+
+    def _handle_get_trajectory_plan(
+        self,
+        start_response: Any,
+        *,
+        request_id: str,
+        trajectory_plan_id: str,
+    ) -> list[bytes]:
+        payload = self._repository.get_trajectory_plan_by_id(trajectory_plan_id)
+        if payload is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Trajectory plan not found",
+                    retryable=False,
+                ),
+            )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.OK,
+            _success_envelope(request_id=request_id, data=payload),
+        )
+
     def _handle_append_interview_response(
         self,
         environ: dict[str, Any],
@@ -1475,6 +1673,83 @@ class JobIngestionAPI:
 
         return payload
 
+    def _build_trajectory_plan_payload(
+        self,
+        *,
+        candidate_id: str,
+        target_role: str,
+        progress_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        current_date = datetime.now(timezone.utc).date()
+        current_metrics = progress_summary.get("current") if isinstance(progress_summary, dict) else None
+        current_overall = None
+        if isinstance(current_metrics, dict):
+            maybe_score = current_metrics.get("overall_score")
+            if isinstance(maybe_score, (int, float)) and not isinstance(maybe_score, bool):
+                current_overall = round(float(maybe_score), 2)
+
+        role_readiness_score = current_overall if current_overall is not None else 65.0
+        milestones = [
+            {
+                "name": f"Establish {target_role} readiness baseline",
+                "target_date": (current_date + timedelta(days=14)).isoformat(),
+                "metric": "Complete 2 mock sessions with score deltas tracked per competency.",
+            },
+            {
+                "name": f"Close highest-risk competency gaps for {target_role}",
+                "target_date": (current_date + timedelta(days=42)).isoformat(),
+                "metric": "Raise top 2 gap competencies by at least 10 points each.",
+            },
+            {
+                "name": f"Demonstrate consistent {target_role} interview signal",
+                "target_date": (current_date + timedelta(days=84)).isoformat(),
+                "metric": "Sustain >=75 overall score across 3 consecutive sessions.",
+            },
+        ]
+
+        weekly_plan = [
+            {
+                "week": 1,
+                "actions": [
+                    "Review latest feedback report and extract top root-cause tags.",
+                    "Draft STAR responses for 3 role-critical competencies.",
+                ],
+            },
+            {
+                "week": 2,
+                "actions": [
+                    "Run a timed mock session and score each response for clarity and evidence.",
+                    "Revise low-signal answers with quantified outcomes and tradeoff rationale.",
+                ],
+            },
+            {
+                "week": 3,
+                "actions": [
+                    "Practice follow-up depth for system and behavioral scenarios.",
+                    "Capture one concrete improvement metric per competency.",
+                ],
+            },
+            {
+                "week": 4,
+                "actions": [
+                    "Run a full simulation and compare trend movement against baseline.",
+                    "Prioritize next-cycle focus areas based on remaining high-risk gaps.",
+                ],
+            },
+        ]
+
+        return {
+            "trajectory_plan_id": f"tp_{uuid4().hex}",
+            "candidate_id": candidate_id,
+            "target_role": target_role,
+            "horizon_months": 3,
+            "role_readiness_score": role_readiness_score,
+            "milestones": milestones,
+            "weekly_plan": weekly_plan,
+            "progress_summary": progress_summary,
+            "generated_at": _utc_timestamp(),
+        }
+
 
 def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
     resolved_db_path = db_path or os.environ.get("JOBCOACH_DB_PATH") or ".tmp/migrate-local.sqlite3"
@@ -1485,6 +1760,7 @@ def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
     candidate_storybank_generator = _CANDIDATE_STORYBANK_MODULE.CandidateStorybankGenerator()
     interview_question_planner = _INTERVIEW_PLANNER_MODULE.DeterministicQuestionPlanner()
     interview_followup_selector = _INTERVIEW_FOLLOWUP_MODULE.AdaptiveFollowupSelector()
+    progress_aggregator = _PROGRESS_AGGREGATOR_MODULE.LongitudinalProgressAggregator()
     return JobIngestionAPI(
         repository=SQLiteJobIngestionRepository(resolved_db_path),
         extraction_worker=extraction_worker,
@@ -1494,6 +1770,7 @@ def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
         candidate_storybank_generator=candidate_storybank_generator,
         interview_question_planner=interview_question_planner,
         interview_followup_selector=interview_followup_selector,
+        progress_aggregator=progress_aggregator,
     )
 
 
@@ -1627,6 +1904,20 @@ def _validate_create_feedback_report_payload(payload: dict[str, Any]) -> list[di
     regenerate = payload.get("regenerate")
     if regenerate is not None and not isinstance(regenerate, bool):
         errors.append({"field": "regenerate", "reason": "must be a boolean when provided"})
+
+    return errors
+
+
+def _validate_create_trajectory_plan_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+
+    candidate_id = payload.get("candidate_id")
+    if not isinstance(candidate_id, str) or not candidate_id.strip():
+        errors.append({"field": "candidate_id", "reason": "must be a non-empty string"})
+
+    target_role = payload.get("target_role")
+    if not isinstance(target_role, str) or not target_role.strip():
+        errors.append({"field": "target_role", "reason": "must be a non-empty string"})
 
     return errors
 

@@ -6,17 +6,17 @@
 
 ## Active Task
 
-- Task ID: `M5-001`
-- Task: Add `TrajectoryPlan` orchestration contract endpoints and storage migration.
-- Why now: `M5-PLAN-001` is complete, and M5 execution should begin with contract/storage foundations for trajectory planning.
+- Task ID: `M5-003`
+- Task: Implement trajectory milestone + weekly-plan generator from trend metrics and target-role competency gaps.
+- Why now: `M5-002` deterministic progress aggregation is complete, so trajectory generation can now consume stable baseline/current/delta metrics.
 
 ## Exact Next Steps
 
-1. Extend OpenAPI for trajectory-plan create/get endpoints and request/response schemas (including idempotency/error semantics).
-2. Add SQL migration(s) for `trajectory_plans` persistence with idempotency support and retrieval indexes.
-3. Implement API gateway handler + repository flows for create/get with deterministic response envelopes.
-4. Add contract/unit coverage for happy path, validation failures, idempotency replay/conflict, and not-found retrieval.
-5. Update planning docs to mark `M5-001` complete and move pointer to `M5-002`.
+1. Replace static trajectory milestones and weekly actions with generator logic derived from aggregated trend metrics and competency deltas.
+2. Incorporate target-role gap emphasis so top-risk competencies influence milestone priority and weekly action sequencing.
+3. Enforce deterministic generation behavior (stable ordering, bounded horizon, repeatable outputs for fixed inputs).
+4. Add unit/contract tests asserting schema validity, date ordering, and evidence-linked action generation from fixed trend fixtures.
+5. Update planning docs to mark `M5-003` complete and move pointer to `M5-004`.
 
 ## Validation Required
 
@@ -29,4 +29,4 @@
 
 ## Return Pointer
 
-After `M5-001` is complete, execute `M5-002`.
+After `M5-003` is complete, execute `M5-004`.
