@@ -1,4 +1,4 @@
-.PHONY: help lint test benchmark-extraction benchmark-candidate-parse benchmark-interview-relevance benchmark-feedback-quality migrate-up migrate-down contract-test validate-openapi
+.PHONY: help lint test benchmark-extraction benchmark-candidate-parse benchmark-interview-relevance benchmark-feedback-quality migrate-up migrate-down contract-test validate-openapi docker-build docker-up docker-down docker-logs docker-ps docker-shell docker-test
 
 PYTHON ?= python3
 OPENAPI_SPEC ?= schemas/openapi/openapi.yaml
@@ -21,6 +21,9 @@ INTERVIEW_BENCHMARK_REPORT_PATH ?= .tmp/interview-relevance-benchmark-report.jso
 FEEDBACK_BENCHMARK_RUNNER ?= services/quality-eval/benchmark/feedback_quality_benchmark.py
 FEEDBACK_BENCHMARK_FIXTURE_DIR ?= tests/unit/fixtures/feedback_quality
 FEEDBACK_BENCHMARK_REPORT_PATH ?= .tmp/feedback-quality-benchmark-report.json
+DOCKER_COMPOSE ?= docker compose
+DOCKER_SERVICE ?= api
+DOCKER_IMAGE ?= jobcoach-api:dev
 
 help: ## Show available targets
 	@echo "Available targets:"
@@ -80,3 +83,25 @@ contract-test: ## Run deterministic migration rollback + contract artifact valid
 
 validate-openapi: ## Validate runtime OpenAPI contract
 	@./tools/scripts/validate_openapi.sh $(OPENAPI_SPEC)
+
+docker-build: ## Build Docker image for API runtime
+	@docker build -t "$(DOCKER_IMAGE)" .
+
+docker-up: ## Start API via docker compose
+	@$(DOCKER_COMPOSE) up --build -d "$(DOCKER_SERVICE)"
+
+docker-down: ## Stop docker compose services
+	@$(DOCKER_COMPOSE) down
+
+docker-logs: ## Tail API logs from docker compose
+	@$(DOCKER_COMPOSE) logs -f "$(DOCKER_SERVICE)"
+
+docker-ps: ## Show docker compose service status
+	@$(DOCKER_COMPOSE) ps
+
+docker-shell: ## Open an interactive shell in the API container
+	@$(DOCKER_COMPOSE) run --rm "$(DOCKER_SERVICE)" bash
+
+docker-test: ## Run test + contract gates inside container
+	@$(DOCKER_COMPOSE) build "$(DOCKER_SERVICE)"
+	@$(DOCKER_COMPOSE) run --rm -e JOBCOACH_AUTO_MIGRATE=0 -e MIGRATE_DB_PATH=/tmp/migrate-local.sqlite3 "$(DOCKER_SERVICE)" make test validate-openapi contract-test
