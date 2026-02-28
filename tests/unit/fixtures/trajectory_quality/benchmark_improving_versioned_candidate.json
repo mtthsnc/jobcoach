@@ -1,0 +1,78 @@
+{
+  "case_id": "improving_versioned_candidate",
+  "candidate_id": "cand_traj_quality_001",
+  "candidate_profile": {
+    "candidate_id": "cand_traj_quality_001",
+    "skills": {
+      "python": 0.9,
+      "execution": 0.6,
+      "communication": 0.55
+    }
+  },
+  "target_role": "Senior Backend Engineer",
+  "reference_date": "2026-02-28",
+  "interview_sessions": [
+    {
+      "session_id": "sess_tq_001",
+      "created_at": "2026-02-20T10:00:00+00:00",
+      "scores": {
+        "skill.communication": 55.0,
+        "skill.execution": 60.0,
+        "skill.python": 70.0
+      },
+      "overall_score": 61.67
+    },
+    {
+      "session_id": "sess_tq_002",
+      "created_at": "2026-02-22T10:00:00+00:00",
+      "scores": {
+        "skill.communication": 75.0,
+        "skill.execution": 58.0,
+        "skill.python": 82.0
+      },
+      "overall_score": 71.67
+    }
+  ],
+  "feedback_reports": [
+    {
+      "feedback_report_id": "fb_tq_001",
+      "generated_at": "2026-02-24T10:00:00+00:00",
+      "competency_scores": {
+        "skill.communication": 78.0,
+        "skill.execution": 52.0,
+        "skill.python": 84.0
+      },
+      "overall_score": 71.33
+    }
+  ],
+  "trajectory_context": {
+    "include_latest": true,
+    "trajectory_plan_id": "tp_benchmark_improving_v2",
+    "version": 2,
+    "supersedes_trajectory_plan_id": "tp_benchmark_improving_v1",
+    "generated_at": "2026-02-28T12:00:00Z"
+  },
+  "expectations": {
+    "top_improving_competencies": [
+      "skill.communication",
+      "skill.python"
+    ],
+    "top_improving_directions": [
+      "improving",
+      "improving"
+    ],
+    "top_risk_competencies": [
+      "skill.execution",
+      "skill.communication",
+      "skill.python"
+    ],
+    "snapshot_count": 3,
+    "momentum": "improving",
+    "readiness_band": "developing",
+    "overall_delta_score": 9.66,
+    "latest_trajectory_available": true,
+    "latest_trajectory_plan_id": "tp_benchmark_improving_v2",
+    "latest_trajectory_version": 2,
+    "latest_trajectory_supersedes_trajectory_plan_id": "tp_benchmark_improving_v1"
+  }
+}

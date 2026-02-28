@@ -50,12 +50,13 @@ Status legend: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`
 | M5-003 | DONE | P0 | M5 | Implement trajectory milestone + weekly-plan generator from trend metrics and target-role competency gaps | M5-002 | Generated `TrajectoryPlan` milestones/weekly plan are schema-valid, date-ordered, and evidence-linked |
 | M5-004 | DONE | P1 | M5 | Persist/retrieve trajectory plans with idempotent generation semantics and optimistic version checks | M5-001,M5-003 | Storage supports idempotent replay, regeneration progression, and expected-version conflict behavior |
 | M5-005 | DONE | P1 | M5 | Add candidate progress dashboard endpoint with competency trend cards and readiness signals | M5-002,M5-004 | Dashboard returns stable trend math and surfaces top-improving/top-risk competencies |
-| M5-006 | TODO | P0 | M5 | Add trajectory quality benchmark + threshold gates for CI/local | M5-005,M0-006 | Benchmark report emitted and CI fails on trend-metric/trajectory-quality regressions |
+| M5-006 | DONE | P0 | M5 | Add trajectory quality benchmark + threshold gates for CI/local | M5-005,M0-006 | Benchmark report emitted and CI fails on trend-metric/trajectory-quality regressions |
+| M6-PLAN-001 | TODO | P0 | M6 | Define executable M6 backlog with dependencies and acceptance criteria | M5-006 | M6 task graph is committed and NEXT pointer targets first executable M6 task |
 
 ## NEXT
 
-- `NEXT-1`: Execute `M5-006` trajectory quality benchmark + threshold gates.
-- `NEXT-2`: After `M5-006`, advance to next milestone planning queue.
+- `NEXT-1`: Execute `M6-PLAN-001` and define the executable M6 task graph.
+- `NEXT-2`: After `M6-PLAN-001`, execute the first M6 implementation task.
 
 ## Backlog (Future Milestones)
 

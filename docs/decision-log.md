@@ -108,3 +108,15 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Compute dashboard cards client-side from `TrajectoryPlan.progress_summary`.
   - Expose only progress summary and omit trajectory metadata from dashboard responses.
+
+- Decision ID: `DEC-009`
+- Date (UTC): `2026-02-28`
+- Status: `accepted`
+- Context: M5 trajectory/dashboard logic is now deterministic, but regression protection required a dedicated quality gate that covers trend-card math, readiness signals, and trajectory/dashboard consistency in CI.
+- Decision: Add a deterministic trajectory quality benchmark suite (fixtures for improving, declining, and empty-history candidates with versioned trajectory context) and enforce threshold gates through `make test` and CI reporting.
+- Consequences:
+  - Regressions in trend-metric ordering, readiness composition, schema validity, or trajectory metadata consistency fail fast in local and CI runs.
+  - Benchmark maintenance overhead increases when trajectory/read-model logic intentionally changes.
+- Alternatives considered:
+  - Rely only on endpoint unit/contract tests without a benchmark gate.
+  - Gate only trajectory planner output quality and omit dashboard consistency checks.

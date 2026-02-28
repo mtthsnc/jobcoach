@@ -2,31 +2,28 @@
 
 ## Active Milestone
 
-`M5` (Product Roadmap)
+`M6` (Product Roadmap)
 
 ## Active Task
 
-- Task ID: `M5-006`
-- Task: Add trajectory quality benchmark + threshold gates for CI/local.
-- Why now: `M5-005` dashboard read-model outputs are now deterministic and version-aware, so benchmark thresholds can lock regression behavior for trajectory quality and trend-card stability.
+- Task ID: `M6-PLAN-001`
+- Task: Define executable M6 backlog with dependencies and acceptance criteria.
+- Why now: `M5-006` completed with deterministic trajectory quality gates, so execution can move from M5 delivery into M6 planning for negotiation and post-interview support.
 
 ## Exact Next Steps
 
-1. Implement trajectory quality benchmark runner with deterministic fixture scoring over trend metrics, readiness signals, and trajectory/dashboard consistency.
-2. Add benchmark fixtures that cover improving, declining, and empty-history candidates plus versioned trajectory regeneration context.
-3. Wire threshold gates into `make test`/CI so regressions in trend math or trajectory quality fail deterministically.
-4. Add unit coverage for benchmark metric calculations and threshold-failure reporting.
-5. Update planning docs to mark `M5-006` complete and advance to the next milestone planning task.
+1. Translate the M6 scope from `docs/masterplan.md` and `docs/implementation-plan.md` into an executable task graph.
+2. Define `M6-001+` tasks with dependency ordering, acceptance criteria, and quality gates (including contract/schema/benchmark expectations where applicable).
+3. Update `docs/tasklist.md` with the full M6 queue and clear `TODO` statuses.
+4. Update this pointer to the first executable M6 task after planning is committed.
 
 ## Validation Required
 
-- Confirm quality gates remain green:
-  - `make test`
-  - `make validate-openapi`
-  - `make migrate-up`
-  - `make migrate-down`
-  - `make contract-test`
+- Confirm planning artifacts are coherent and actionable:
+  - `docs/tasklist.md` includes M6 tasks with dependencies and acceptance criteria.
+  - `docs/NEXT_ACTION.md` points to the first executable M6 task.
+  - `docs/work-log.md` records planning evidence and pointer advancement.
 
 ## Return Pointer
 
-After `M5-006` is complete, execute the next milestone planning task.
+After `M6-PLAN-001` is complete, execute the first M6 implementation task.

@@ -1498,3 +1498,53 @@ Use UTC timestamps. Append entries only.
   - No remaining blockers for `M5-005`.
 - Next pointer:
   - Execute `M5-006` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T23:24:02Z
+- Execute `M5-006` trajectory quality benchmark + threshold gates for CI/local.
+- Task IDs: M5-006
+- Changes made:
+  - Added deterministic trajectory quality benchmark runner `services/quality-eval/benchmark/trajectory_quality_benchmark.py`:
+    - scores trend-card alignment, readiness-signal alignment, trajectory/dashboard consistency, trajectory plan structure, and dashboard schema validity,
+    - emits threshold-gated aggregate metrics and detailed case reports.
+  - Added M5 trajectory quality fixtures in `tests/unit/fixtures/trajectory_quality/`:
+    - improving candidate with versioned trajectory regeneration context,
+    - declining candidate trend history,
+    - empty-history candidate fallback behavior.
+  - Added runner regression tests in `tests/unit/test_trajectory_quality_benchmark_runner.py` for default pass thresholds, strict-threshold failure reporting, and report field coverage.
+  - Wired trajectory benchmark into quality-gate execution:
+    - `Makefile`: new benchmark vars/target + `test` target gate execution.
+    - `.github/workflows/ci-placeholder.yml`: publish `.tmp/trajectory-quality-benchmark-report.json`.
+    - `services/quality-eval/README.md`: include trajectory benchmark runner in active status.
+  - Logged decision `DEC-009` for enforcing deterministic trajectory/dashboard quality via benchmark threshold gates.
+- Validation evidence:
+  - `python3 -m unittest -v tests/unit/test_trajectory_quality_benchmark_runner.py`
+  - `python3 services/quality-eval/benchmark/trajectory_quality_benchmark.py --fixtures-dir tests/unit/fixtures/trajectory_quality --report-path .tmp/trajectory-quality-benchmark-report.json`
+  - `make test`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make contract-test`
+- Blockers / risks:
+  - Initial parallel fixture-write attempt failed because the directory was created concurrently; reran sequentially with no remaining issue.
+- Next pointer:
+  - Close `M5-006` in planning docs and advance pointer to `M6-PLAN-001`.
+
+- END
+- 2026-02-28T23:39:52Z
+- Execute `M5-006` trajectory quality benchmark + threshold gates for CI/local.
+- Task IDs: M5-006
+- Changes made:
+  - Marked `M5-006` as `DONE` in `docs/tasklist.md`.
+  - Added `M6-PLAN-001` to `docs/tasklist.md` and updated NEXT queue to M6 planning.
+  - Updated `docs/NEXT_ACTION.md` active pointer to `M6-PLAN-001` with milestone-planning next steps.
+- Validation evidence:
+  - `make test`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make contract-test`
+- Blockers / risks:
+  - No remaining blockers for `M5-006`.
+- Next pointer:
+  - Execute `M6-PLAN-001` from `docs/NEXT_ACTION.md`.

@@ -1,0 +1,23 @@
+{
+  "case_id": "empty_history_candidate",
+  "candidate_id": "cand_traj_quality_003",
+  "candidate_profile": {
+    "candidate_id": "cand_traj_quality_003",
+    "skills": {}
+  },
+  "target_role": "Backend Engineer",
+  "reference_date": "2026-02-28",
+  "interview_sessions": [],
+  "feedback_reports": [],
+  "trajectory_context": {
+    "include_latest": false
+  },
+  "expectations": {
+    "top_improving_competencies": [],
+    "top_risk_competencies": [],
+    "snapshot_count": 0,
+    "momentum": "unknown",
+    "readiness_band": "insufficient_data",
+    "latest_trajectory_available": false
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "case_id": "declining_candidate",
+  "candidate_id": "cand_traj_quality_002",
+  "candidate_profile": {
+    "candidate_id": "cand_traj_quality_002",
+    "skills": {
+      "execution": 0.72,
+      "communication": 0.74,
+      "problem_solving": 0.7
+    }
+  },
+  "target_role": "Engineering Manager",
+  "reference_date": "2026-02-28",
+  "interview_sessions": [
+    {
+      "session_id": "sess_tq_003",
+      "created_at": "2026-01-10T10:00:00+00:00",
+      "scores": {
+        "skill.execution": 72.0,
+        "skill.communication": 74.0,
+        "skill.problem_solving": 70.0
+      },
+      "overall_score": 72.0
+    },
+    {
+      "session_id": "sess_tq_004",
+      "created_at": "2026-01-25T10:00:00+00:00",
+      "scores": {
+        "skill.execution": 60.0,
+        "skill.communication": 58.0,
+        "skill.problem_solving": 55.0
+      },
+      "overall_score": 57.67
+    }
+  ],
+  "feedback_reports": [
+    {
+      "feedback_report_id": "fb_tq_002",
+      "generated_at": "2026-01-18T10:00:00+00:00",
+      "competency_scores": {
+        "skill.execution": 68.0,
+        "skill.communication": 66.0,
+        "skill.problem_solving": 65.0
+      },
+      "overall_score": 66.33
+    }
+  ],
+  "trajectory_context": {
+    "include_latest": false
+  },
+  "expectations": {
+    "top_improving_competencies": [],
+    "top_risk_competencies": [
+      "skill.problem_solving",
+      "skill.communication",
+      "skill.execution"
+    ],
+    "snapshot_count": 3,
+    "momentum": "declining",
+    "readiness_band": "at_risk",
+    "overall_delta_score": -14.33,
+    "latest_trajectory_available": false
+  }
+}
