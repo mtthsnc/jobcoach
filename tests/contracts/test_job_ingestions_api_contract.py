@@ -230,6 +230,8 @@ class JobIngestionApiContractTest(unittest.TestCase):
         table_names = {row[0] for row in rows}
         self.assertIn("job_ingestions", table_names)
         self.assertIn("candidate_ingestions", table_names)
+        self.assertIn("interview_sessions", table_names)
+        self.assertIn("feedback_reports", table_names)
 
     def test_post_and_get_job_ingestion_contract(self) -> None:
         payload = _load_fixture("create_request.json")
@@ -251,6 +253,932 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(get_status, 200, get_body)
         self._assert_ingestion_status_response(get_body, ingestion_id)
 
+    def test_post_and_get_candidate_ingestion_contract(self) -> None:
+        payload = {
+            "candidate_id": "cand_contract_001",
+            "cv_text": (
+                "Maya Rivera\n"
+                "Senior Software Engineer\n"
+                "Experience:\n"
+                "- Built workflow APIs in Python and SQL.\n"
+            ),
+            "story_notes": [
+                "Led incident response with cross-functional stakeholders.",
+                "Reduced API p95 from 600ms to 280ms.",
+            ],
+            "target_roles": ["Staff Backend Engineer", "Platform Engineer"],
+        }
+        idempotency_key = f"candidate-contract-{uuid.uuid4()}"
+        status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/candidate-ingestions",
+            body=payload,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+
+        self.assertEqual(status, 202, create_body)
+        ingestion_id = self._assert_ingestion_accepted_response(create_body)
+        self._assert_candidate_ingestion_row_persisted(ingestion_id, payload, idempotency_key)
+
+        get_status, get_body = self._wait_for_candidate_ingestion_status(ingestion_id)
+        self.assertEqual(get_status, 200, get_body)
+        self._assert_ingestion_status_response(get_body, ingestion_id)
+        result = get_body.get("data", {}).get("result", {})
+        candidate_entity_id = result.get("entity_id") if isinstance(result, dict) else None
+        self.assertIsInstance(candidate_entity_id, str)
+        self.assertTrue(candidate_entity_id)
+        assert isinstance(candidate_entity_id, str)
+        self._assert_candidate_profile_row_persisted(ingestion_id=ingestion_id, candidate_id=candidate_entity_id)
+        self._assert_candidate_storybank_rows_persisted(candidate_id=candidate_entity_id)
+
+    def test_candidate_ingestion_idempotency_conflict_contract(self) -> None:
+        idempotency_key = f"candidate-conflict-{uuid.uuid4()}"
+        first_payload = {
+            "candidate_id": "cand_conflict_001",
+            "cv_text": "Candidate profile text for first request.",
+        }
+        second_payload = {
+            "candidate_id": "cand_conflict_001",
+            "cv_document_ref": "s3://bucket/candidate-resume.pdf",
+        }
+
+        first_status, first_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/candidate-ingestions",
+            body=first_payload,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        self.assertEqual(first_status, 202, first_body)
+
+        second_status, second_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/candidate-ingestions",
+            body=second_payload,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        self.assertEqual(second_status, 409, second_body)
+        self.assertIsNone(second_body.get("data"))
+        self.assertEqual(second_body.get("error", {}).get("code"), "idempotency_key_conflict")
+
+    def test_get_candidate_profile_and_storybank_contract(self) -> None:
+        payload = {
+            "candidate_id": "cand_contract_retrieval_001",
+            "cv_text": (
+                "Alex Kim\n"
+                "Staff Engineer\n"
+                "Acme Corp | Senior Engineer | 2018-01 - 2021-12\n"
+                "Globex Inc | Staff Engineer | 2022-01 - Present\n"
+            ),
+            "story_notes": [
+                "Led cross-functional reliability program with 99.9% uptime.",
+                "Improved deployment success rate by 25%.",
+            ],
+            "target_roles": ["Staff Engineer"],
+        }
+        idempotency_key = f"candidate-retrieval-{uuid.uuid4()}"
+        create_status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/candidate-ingestions",
+            body=payload,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        self.assertEqual(create_status, 202, create_body)
+        ingestion_id = self._assert_ingestion_accepted_response(create_body)
+
+        get_status, get_body = self._wait_for_candidate_ingestion_status(ingestion_id)
+        self.assertEqual(get_status, 200, get_body)
+        result = get_body.get("data", {}).get("result", {})
+        candidate_entity_id = result.get("entity_id") if isinstance(result, dict) else None
+        self.assertIsInstance(candidate_entity_id, str)
+        self.assertTrue(candidate_entity_id)
+        assert isinstance(candidate_entity_id, str)
+
+        profile_status, profile_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/candidates/{candidate_entity_id}/profile",
+        )
+        self.assertEqual(profile_status, 200, profile_body)
+        profile_data = profile_body.get("data", {})
+        self.assertEqual(profile_data.get("candidate_id"), candidate_entity_id)
+        self.assertIn("storybank", profile_data)
+        self.assertIsInstance(profile_data.get("storybank"), list)
+        self.assertGreaterEqual(len(profile_data.get("storybank", [])), 1)
+
+        storybank_status, storybank_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/candidates/{candidate_entity_id}/storybank?limit=1&competency=execution&min_quality=0.6",
+        )
+        self.assertEqual(storybank_status, 200, storybank_body)
+        storybank_data = storybank_body.get("data", {})
+        self.assertIsInstance(storybank_data.get("items"), list)
+        self.assertGreaterEqual(len(storybank_data.get("items", [])), 1)
+        self.assertIn("next_cursor", storybank_data)
+        first_story = storybank_data["items"][0]
+        self.assertIn("execution", first_story.get("competencies", []))
+        self.assertGreaterEqual(float(first_story.get("evidence_quality", 0)), 0.6)
+
+        next_cursor = storybank_data.get("next_cursor")
+        if isinstance(next_cursor, str) and next_cursor:
+            page_two_status, page_two_body = _request_json(
+                self.base_url,
+                "GET",
+                f"{API_PREFIX}/candidates/{candidate_entity_id}/storybank?limit=1&cursor={next_cursor}",
+            )
+            self.assertEqual(page_two_status, 200, page_two_body)
+            self.assertIsInstance(page_two_body.get("data", {}).get("items"), list)
+
+    def test_patch_job_spec_review_conflict_contract(self) -> None:
+        create_payload = {
+            "source_type": "text",
+            "source_value": (
+                "Backend Engineer\n"
+                "Responsibilities:\n"
+                "- Build Python services.\n"
+                "Requirements:\n"
+                "- Strong SQL.\n"
+            ),
+        }
+        idempotency_key = f"review-contract-{uuid.uuid4()}"
+        status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/job-ingestions",
+            body=create_payload,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        self.assertEqual(status, 202, create_body)
+        ingestion_id = self._assert_ingestion_accepted_response(create_body)
+
+        get_status, get_body = self._wait_for_ingestion_status(ingestion_id)
+        self.assertEqual(get_status, 200, get_body)
+        data = get_body.get("data", {})
+        result = data.get("result", {}) if isinstance(data, dict) else {}
+        job_spec_id = result.get("entity_id") if isinstance(result, dict) else None
+        self.assertIsInstance(job_spec_id, str)
+        self.assertTrue(job_spec_id)
+        assert isinstance(job_spec_id, str)
+
+        review_path = f"{API_PREFIX}/job-specs/{job_spec_id}/review"
+        first_status, first_body = _request_json(
+            self.base_url,
+            "PATCH",
+            review_path,
+            body={
+                "expected_version": 1,
+                "patch": {"role_title": "Senior Backend Engineer"},
+            },
+        )
+        self.assertEqual(first_status, 200, first_body)
+        self.assertEqual(first_body.get("data", {}).get("version"), 2)
+
+        conflict_status, conflict_body = _request_json(
+            self.base_url,
+            "PATCH",
+            review_path,
+            body={
+                "expected_version": 1,
+                "patch": {"role_title": "Principal Backend Engineer"},
+            },
+        )
+        self.assertEqual(conflict_status, 409, conflict_body)
+        self.assertIsNone(conflict_body.get("data"))
+        self.assertEqual(conflict_body.get("error", {}).get("code"), "version_conflict")
+
+    def test_create_and_get_interview_session_contract(self) -> None:
+        job_spec_id = self._create_job_spec_entity_for_interview()
+        candidate_id = self._create_candidate_entity_for_interview()
+
+        create_status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions",
+            body={
+                "job_spec_id": job_spec_id,
+                "candidate_id": candidate_id,
+                "mode": "mock_interview",
+            },
+        )
+        self.assertEqual(create_status, 201, create_body)
+        session_data = create_body.get("data", {})
+        session_id = session_data.get("session_id")
+        self.assertIsInstance(session_id, str)
+        self.assertTrue(session_id)
+        assert isinstance(session_id, str)
+        self.assertEqual(session_data.get("job_spec_id"), job_spec_id)
+        self.assertEqual(session_data.get("candidate_id"), candidate_id)
+        self.assertIsInstance(session_data.get("questions"), list)
+        self.assertGreaterEqual(len(session_data.get("questions", [])), 1)
+        ranking_positions = []
+        for question in session_data.get("questions", []):
+            metadata = question.get("planner_metadata")
+            self.assertIsInstance(metadata, dict)
+            self.assertEqual(metadata.get("source_competency"), question.get("competency"))
+            self.assertIsInstance(metadata.get("ranking_position"), int)
+            self.assertIsInstance(metadata.get("deterministic_confidence"), float)
+            ranking_positions.append(int(metadata["ranking_position"]))
+        self.assertEqual(ranking_positions, list(range(1, len(ranking_positions) + 1)))
+
+        second_create_status, second_create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions",
+            body={
+                "job_spec_id": job_spec_id,
+                "candidate_id": candidate_id,
+                "mode": "mock_interview",
+            },
+        )
+        self.assertEqual(second_create_status, 201, second_create_body)
+
+        def signature(questions: list[dict]) -> list[tuple]:
+            return [
+                (
+                    question.get("competency"),
+                    question.get("text"),
+                    question.get("difficulty"),
+                    question.get("planner_metadata", {}).get("ranking_position"),
+                    question.get("planner_metadata", {}).get("deterministic_confidence"),
+                )
+                for question in questions
+            ]
+
+        self.assertEqual(
+            signature(session_data.get("questions", [])),
+            signature(second_create_body.get("data", {}).get("questions", [])),
+        )
+
+        get_status, get_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/interview-sessions/{session_id}",
+        )
+        self.assertEqual(get_status, 200, get_body)
+        self.assertEqual(get_body.get("data", {}).get("session_id"), session_id)
+        self.assertEqual(get_body.get("data", {}).get("job_spec_id"), job_spec_id)
+        self.assertEqual(get_body.get("data", {}).get("candidate_id"), candidate_id)
+
+        self._assert_interview_session_row_persisted(session_id=session_id, job_spec_id=job_spec_id, candidate_id=candidate_id)
+
+    def test_append_interview_response_contract_with_idempotency(self) -> None:
+        job_spec_id = self._create_job_spec_entity_for_interview()
+        candidate_id = self._create_candidate_entity_for_interview()
+        create_status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions",
+            body={"job_spec_id": job_spec_id, "candidate_id": candidate_id},
+        )
+        self.assertEqual(create_status, 201, create_body)
+        session_id = create_body.get("data", {}).get("session_id")
+        self.assertIsInstance(session_id, str)
+        self.assertTrue(session_id)
+        assert isinstance(session_id, str)
+
+        response_payload = {
+            "response": "I led a migration that improved uptime to 99.9% and reduced incidents by 30%.",
+        }
+        update_status, update_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions/{session_id}/responses",
+            body=response_payload,
+            headers={"Idempotency-Key": "contract-interview-response-001"},
+        )
+        self.assertEqual(update_status, 200, update_body)
+        self.assertEqual(update_body.get("data", {}).get("session_id"), session_id)
+        self.assertGreaterEqual(float(update_body.get("data", {}).get("overall_score", 0.0)), 0.0)
+        self.assertLessEqual(float(update_body.get("data", {}).get("overall_score", 0.0)), 100.0)
+
+        replay_status, replay_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions/{session_id}/responses",
+            body=response_payload,
+            headers={"Idempotency-Key": "contract-interview-response-001"},
+        )
+        self.assertEqual(replay_status, 200, replay_body)
+
+        conflict_status, conflict_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions/{session_id}/responses",
+            body={"response": "Different response payload for same idempotency key."},
+            headers={"Idempotency-Key": "contract-interview-response-001"},
+        )
+        self.assertEqual(conflict_status, 409, conflict_body)
+        self.assertEqual(conflict_body.get("error", {}).get("code"), "idempotency_key_conflict")
+
+        self._assert_interview_response_row_persisted(session_id=session_id, idempotency_key="contract-interview-response-001")
+
+    def test_adaptive_followup_selection_contract(self) -> None:
+        job_spec_id = self._create_job_spec_entity_for_interview()
+        candidate_id = self._create_candidate_entity_for_interview()
+        create_status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions",
+            body={"job_spec_id": job_spec_id, "candidate_id": candidate_id},
+        )
+        self.assertEqual(create_status, 201, create_body)
+        session_data = create_body.get("data", {})
+        session_id = session_data.get("session_id")
+        self.assertIsInstance(session_id, str)
+        self.assertTrue(session_id)
+        assert isinstance(session_id, str)
+
+        opening_questions = session_data.get("questions", [])
+        self.assertIsInstance(opening_questions, list)
+        self.assertGreaterEqual(len(opening_questions), 1)
+
+        latest_session = session_data
+        for idx, question in enumerate(opening_questions, start=1):
+            update_status, update_body = _request_json(
+                self.base_url,
+                "POST",
+                f"{API_PREFIX}/interview-sessions/{session_id}/responses",
+                body={
+                    "question_id": question.get("question_id"),
+                    "response": (
+                        "I led a migration that improved uptime to 99.9%, reduced latency by 35%, "
+                        "and stabilized deployment quality."
+                    ),
+                },
+                headers={"Idempotency-Key": f"contract-adaptive-followup-{idx}"},
+            )
+            self.assertEqual(update_status, 200, update_body)
+            latest_session = update_body.get("data", {})
+
+        latest_questions = latest_session.get("questions", [])
+        self.assertGreater(len(latest_questions), len(opening_questions), latest_session)
+        followup = latest_questions[-1]
+        self.assertNotEqual(followup.get("competency"), opening_questions[-1].get("competency"))
+        self.assertGreaterEqual(int(followup.get("difficulty", 0)), 1)
+        self.assertLessEqual(int(followup.get("difficulty", 0)), 5)
+
+        planner_metadata = followup.get("planner_metadata")
+        self.assertIsInstance(planner_metadata, dict)
+        self.assertIn(
+            planner_metadata.get("selection_reason"),
+            {"coverage_gap", "coverage_extension", "stabilize_signal"},
+        )
+        self.assertEqual(planner_metadata.get("trigger_question_id"), opening_questions[-1].get("question_id"))
+
+    def test_interview_session_completion_snapshots_contract(self) -> None:
+        job_spec_id = self._create_job_spec_entity_for_interview()
+        candidate_id = self._create_candidate_entity_for_interview()
+        create_status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions",
+            body={"job_spec_id": job_spec_id, "candidate_id": candidate_id},
+        )
+        self.assertEqual(create_status, 201, create_body)
+        session = create_body.get("data", {})
+        session_id = session.get("session_id")
+        self.assertIsInstance(session_id, str)
+        self.assertTrue(session_id)
+        assert isinstance(session_id, str)
+
+        expected_version = int(session.get("version", 1))
+        turn_count = 0
+        for _ in range(8):
+            unanswered = [
+                question for question in session.get("questions", []) if not str(question.get("response", "")).strip()
+            ]
+            if not unanswered:
+                break
+
+            turn_count += 1
+            target = unanswered[0]
+            update_status, update_body = _request_json(
+                self.base_url,
+                "POST",
+                f"{API_PREFIX}/interview-sessions/{session_id}/responses",
+                body={
+                    "question_id": target.get("question_id"),
+                    "response": (
+                        "I led delivery work, improved reliability by 24%, and aligned "
+                        "cross-functional stakeholders to complete migrations safely."
+                    ),
+                },
+                headers={"Idempotency-Key": f"contract-session-complete-{turn_count}"},
+            )
+            self.assertEqual(update_status, 200, update_body)
+            session = update_body.get("data", {})
+            expected_version += 1
+            self.assertEqual(int(session.get("version", 0)), expected_version)
+
+        self.assertEqual(session.get("status"), "completed", session)
+        self.assertTrue(all(str(item.get("response", "")).strip() for item in session.get("questions", [])))
+        self.assertGreaterEqual(turn_count, 3)
+
+        get_status, get_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/interview-sessions/{session_id}",
+        )
+        self.assertEqual(get_status, 200, get_body)
+        snapshot = get_body.get("data", {})
+        self.assertEqual(snapshot.get("status"), "completed")
+        self.assertEqual(snapshot.get("version"), session.get("version"))
+        self.assertEqual(snapshot.get("scores"), session.get("scores"))
+        self.assertEqual(snapshot.get("overall_score"), session.get("overall_score"))
+        self.assertTrue(all(str(item.get("response", "")).strip() for item in snapshot.get("questions", [])))
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT version, status, overall_score
+                FROM interview_sessions
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+            response_rows = conn.execute(
+                """
+                SELECT idempotency_key, question_id, response_text, score
+                FROM interview_session_responses
+                WHERE session_id = ?
+                ORDER BY created_at ASC
+                """,
+                (session_id,),
+            ).fetchall()
+
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(int(row[0]), int(snapshot.get("version", 0)))
+        self.assertEqual(str(row[1]), "completed")
+        self.assertEqual(float(row[2]), float(snapshot.get("overall_score", 0.0)))
+
+        self.assertEqual(len(response_rows), turn_count)
+        for response_row in response_rows:
+            self.assertTrue(response_row[0])
+            self.assertTrue(response_row[1])
+            self.assertTrue(response_row[2])
+            self.assertGreaterEqual(float(response_row[3]), 0.0)
+            self.assertLessEqual(float(response_row[3]), 100.0)
+
+    def test_interview_orchestration_validation_and_not_found_contract(self) -> None:
+        missing_status, missing_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions/sess_missing_001/responses",
+            body={"response": "Response for missing session."},
+            headers={"Idempotency-Key": "contract-missing-session-001"},
+        )
+        self.assertEqual(missing_status, 404, missing_body)
+        self.assertEqual(missing_body.get("error", {}).get("code"), "not_found")
+
+        get_missing_status, get_missing_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/interview-sessions/sess_missing_001",
+        )
+        self.assertEqual(get_missing_status, 404, get_missing_body)
+        self.assertEqual(get_missing_body.get("error", {}).get("code"), "not_found")
+
+        job_spec_id = self._create_job_spec_entity_for_interview()
+        candidate_id = self._create_candidate_entity_for_interview()
+        create_status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions",
+            body={"job_spec_id": job_spec_id, "candidate_id": candidate_id},
+        )
+        self.assertEqual(create_status, 201, create_body)
+        session_id = create_body.get("data", {}).get("session_id")
+        self.assertIsInstance(session_id, str)
+        self.assertTrue(session_id)
+        assert isinstance(session_id, str)
+
+        missing_header_status, missing_header_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions/{session_id}/responses",
+            body={"response": "Answer without idempotency key."},
+        )
+        self.assertEqual(missing_header_status, 400, missing_header_body)
+        self.assertEqual(missing_header_body.get("error", {}).get("code"), "invalid_request")
+
+        invalid_body_status, invalid_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions/{session_id}/responses",
+            body={"response": ""},
+            headers={"Idempotency-Key": "contract-invalid-body-001"},
+        )
+        self.assertEqual(invalid_body_status, 400, invalid_body)
+        self.assertEqual(invalid_body.get("error", {}).get("code"), "invalid_request")
+
+        invalid_question_status, invalid_question_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions/{session_id}/responses",
+            body={"question_id": "q_missing", "response": "This question id does not exist."},
+            headers={"Idempotency-Key": "contract-invalid-question-001"},
+        )
+        self.assertEqual(invalid_question_status, 400, invalid_question_body)
+        self.assertEqual(invalid_question_body.get("error", {}).get("code"), "invalid_request")
+
+        invalid_override_status, invalid_override_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions/{session_id}/responses",
+            body={
+                "response": "Answer with malformed override payload.",
+                "override_followup": {
+                    "reviewer_id": "",
+                    "reason": "Needs override",
+                    "competency": "skill.communication",
+                    "difficulty": 9,
+                },
+            },
+            headers={"Idempotency-Key": "contract-invalid-override-001"},
+        )
+        self.assertEqual(invalid_override_status, 400, invalid_override_body)
+        self.assertEqual(invalid_override_body.get("error", {}).get("code"), "invalid_request")
+
+    def test_interview_response_expected_version_conflict_contract(self) -> None:
+        job_spec_id = self._create_job_spec_entity_for_interview()
+        candidate_id = self._create_candidate_entity_for_interview()
+        create_status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions",
+            body={"job_spec_id": job_spec_id, "candidate_id": candidate_id},
+        )
+        self.assertEqual(create_status, 201, create_body)
+        session_id = create_body.get("data", {}).get("session_id")
+        self.assertIsInstance(session_id, str)
+        self.assertTrue(session_id)
+        assert isinstance(session_id, str)
+
+        conflict_status, conflict_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions/{session_id}/responses",
+            body={
+                "response": "I improved reliability and delivery outcomes.",
+                "expected_version": 42,
+            },
+            headers={"Idempotency-Key": "contract-expected-version-conflict-001"},
+        )
+        self.assertEqual(conflict_status, 409, conflict_body)
+        self.assertEqual(conflict_body.get("error", {}).get("code"), "version_conflict")
+        reasons = [detail.get("reason", "") for detail in conflict_body.get("error", {}).get("details", [])]
+        self.assertTrue(any("current version is 1" in reason for reason in reasons))
+
+    def test_reviewer_override_followup_contract(self) -> None:
+        job_spec_id = self._create_job_spec_entity_for_interview()
+        candidate_id = self._create_candidate_entity_for_interview()
+        create_status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions",
+            body={"job_spec_id": job_spec_id, "candidate_id": candidate_id},
+        )
+        self.assertEqual(create_status, 201, create_body)
+        session = create_body.get("data", {})
+        session_id = session.get("session_id")
+        self.assertIsInstance(session_id, str)
+        self.assertTrue(session_id)
+        assert isinstance(session_id, str)
+
+        opening_questions = session.get("questions", [])
+        self.assertGreaterEqual(len(opening_questions), 1)
+        current_version = int(session.get("version", 1))
+        override_key = "contract-reviewer-override-001"
+
+        for idx, question in enumerate(opening_questions, start=1):
+            body: dict = {
+                "question_id": question.get("question_id"),
+                "response": (
+                    "I aligned cross-functional stakeholders and improved uptime by 19%."
+                    if idx < len(opening_questions)
+                    else "ok"
+                ),
+                "expected_version": current_version,
+            }
+            idempotency_key = f"contract-reviewer-override-seed-{idx}"
+            if idx == len(opening_questions):
+                body["override_followup"] = {
+                    "reviewer_id": "rev_contract_001",
+                    "reason": "Need to probe communication and collaboration depth.",
+                    "competency": "skill.communication",
+                    "difficulty": 4,
+                }
+                idempotency_key = override_key
+
+            update_status, update_body = _request_json(
+                self.base_url,
+                "POST",
+                f"{API_PREFIX}/interview-sessions/{session_id}/responses",
+                body=body,
+                headers={"Idempotency-Key": idempotency_key},
+            )
+            self.assertEqual(update_status, 200, update_body)
+            session = update_body.get("data", {})
+            current_version += 1
+            self.assertEqual(int(session.get("version", 0)), current_version)
+
+        followup = session.get("questions", [])[-1]
+        self.assertEqual(followup.get("competency"), "skill.communication")
+        metadata = followup.get("planner_metadata", {})
+        self.assertEqual(metadata.get("selection_reason"), "reviewer_override")
+        self.assertTrue(metadata.get("override_applied"))
+        self.assertEqual(metadata.get("override_reviewer_id"), "rev_contract_001")
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT request_json
+                FROM interview_session_responses
+                WHERE session_id = ? AND idempotency_key = ?
+                """,
+                (session_id, override_key),
+            ).fetchone()
+        self.assertIsNotNone(row)
+        assert row is not None
+        request_json = json.loads(str(row[0]))
+        self.assertEqual(request_json.get("override_followup", {}).get("reviewer_id"), "rev_contract_001")
+        self.assertEqual(request_json.get("expected_version"), current_version - 1)
+
+    def test_create_and_get_feedback_report_contract(self) -> None:
+        session_id = self._create_interview_session_entity_for_feedback()
+        idempotency_key = f"feedback-create-{uuid.uuid4()}"
+
+        create_status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/feedback-reports",
+            body={"session_id": session_id},
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        self.assertEqual(create_status, 201, create_body)
+        feedback_data = create_body.get("data", {})
+        feedback_report_id = feedback_data.get("feedback_report_id")
+        self.assertIsInstance(feedback_report_id, str)
+        self.assertTrue(feedback_report_id)
+        assert isinstance(feedback_report_id, str)
+        self.assertEqual(feedback_data.get("session_id"), session_id)
+        self.assertIsInstance(feedback_data.get("top_gaps"), list)
+        self.assertGreaterEqual(len(feedback_data.get("top_gaps", [])), 1)
+        self.assertIsInstance(feedback_data.get("action_plan"), list)
+        self.assertGreaterEqual(len(feedback_data.get("action_plan", [])), 1)
+        self.assertIsInstance(feedback_data.get("overall_score"), (int, float))
+        self.assertGreaterEqual(float(feedback_data.get("overall_score", 0.0)), 0.0)
+        self.assertLessEqual(float(feedback_data.get("overall_score", 0.0)), 100.0)
+        self.assertIsInstance(feedback_data.get("answer_rewrites"), list)
+        self.assertGreaterEqual(len(feedback_data.get("answer_rewrites", [])), 1)
+        self.assertIsInstance(feedback_data.get("action_plan"), list)
+        self.assertEqual(len(feedback_data.get("action_plan", [])), 30)
+        self.assertEqual(
+            [entry.get("day") for entry in feedback_data.get("action_plan", [])],
+            list(range(1, 31)),
+        )
+        self.assertEqual(feedback_data.get("version"), 1)
+        self.assertIsNone(feedback_data.get("supersedes_feedback_report_id"))
+        first_gap = feedback_data.get("top_gaps", [None])[0]
+        self.assertIsInstance(first_gap, dict)
+        assert isinstance(first_gap, dict)
+        self.assertIn(first_gap.get("severity"), {"low", "medium", "high", "critical"})
+        self.assertTrue(str(first_gap.get("root_cause", "")).strip())
+        self.assertTrue(str(first_gap.get("evidence", "")).strip())
+
+        get_status, get_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/feedback-reports/{feedback_report_id}",
+        )
+        self.assertEqual(get_status, 200, get_body)
+        self.assertEqual(get_body.get("data", {}).get("feedback_report_id"), feedback_report_id)
+        self.assertEqual(get_body.get("data", {}).get("session_id"), session_id)
+        self.assertEqual(get_body.get("data", {}).get("overall_score"), feedback_data.get("overall_score"))
+        self.assertEqual(get_body.get("data", {}).get("top_gaps"), feedback_data.get("top_gaps"))
+        self.assertEqual(get_body.get("data", {}).get("action_plan"), feedback_data.get("action_plan"))
+        self.assertEqual(get_body.get("data", {}).get("answer_rewrites"), feedback_data.get("answer_rewrites"))
+        self.assertEqual(get_body.get("data", {}).get("version"), 1)
+        self.assertIsNone(get_body.get("data", {}).get("supersedes_feedback_report_id"))
+
+        self._assert_feedback_report_row_persisted(
+            feedback_report_id=feedback_report_id,
+            session_id=session_id,
+            idempotency_key=idempotency_key,
+        )
+
+    def test_feedback_report_idempotency_conflict_contract(self) -> None:
+        first_session_id = self._create_interview_session_entity_for_feedback()
+        second_session_id = self._create_interview_session_entity_for_feedback()
+        shared_key = f"feedback-idempotency-{uuid.uuid4()}"
+
+        first_status, first_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/feedback-reports",
+            body={"session_id": first_session_id},
+            headers={"Idempotency-Key": shared_key},
+        )
+        self.assertEqual(first_status, 201, first_body)
+        first_report_id = first_body.get("data", {}).get("feedback_report_id")
+        self.assertIsInstance(first_report_id, str)
+        self.assertTrue(first_report_id)
+        assert isinstance(first_report_id, str)
+
+        replay_status, replay_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/feedback-reports",
+            body={"session_id": first_session_id},
+            headers={"Idempotency-Key": shared_key},
+        )
+        self.assertEqual(replay_status, 201, replay_body)
+        self.assertEqual(replay_body.get("data", {}).get("feedback_report_id"), first_report_id)
+
+        conflict_status, conflict_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/feedback-reports",
+            body={"session_id": second_session_id},
+            headers={"Idempotency-Key": shared_key},
+        )
+        self.assertEqual(conflict_status, 409, conflict_body)
+        self.assertEqual(conflict_body.get("error", {}).get("code"), "idempotency_key_conflict")
+
+    def test_feedback_report_expected_version_conflict_contract(self) -> None:
+        session_id = self._create_interview_session_entity_for_feedback()
+
+        first_status, first_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/feedback-reports",
+            body={"session_id": session_id},
+            headers={"Idempotency-Key": f"feedback-version-initial-{uuid.uuid4()}"},
+        )
+        self.assertEqual(first_status, 201, first_body)
+        first_data = first_body.get("data", {})
+        first_report_id = first_data.get("feedback_report_id")
+        self.assertIsInstance(first_report_id, str)
+        self.assertEqual(first_data.get("version"), 1)
+
+        conflict_status, conflict_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/feedback-reports",
+            body={"session_id": session_id, "expected_version": 0},
+            headers={"Idempotency-Key": f"feedback-version-conflict-{uuid.uuid4()}"},
+        )
+        self.assertEqual(conflict_status, 409, conflict_body)
+        self.assertEqual(conflict_body.get("error", {}).get("code"), "version_conflict")
+        details = conflict_body.get("error", {}).get("details", [])
+        self.assertTrue(any("current version is 1" in str(item.get("reason", "")) for item in details))
+
+        second_status, second_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/feedback-reports",
+            body={"session_id": session_id, "expected_version": 1},
+            headers={"Idempotency-Key": f"feedback-version-next-{uuid.uuid4()}"},
+        )
+        self.assertEqual(second_status, 201, second_body)
+        second_data = second_body.get("data", {})
+        self.assertEqual(second_data.get("version"), 2)
+        self.assertEqual(second_data.get("supersedes_feedback_report_id"), first_report_id)
+
+    def test_feedback_report_validation_and_not_found_contract(self) -> None:
+        session_id = self._create_interview_session_entity_for_feedback()
+
+        missing_header_status, missing_header_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/feedback-reports",
+            body={"session_id": session_id},
+        )
+        self.assertEqual(missing_header_status, 400, missing_header_body)
+        self.assertEqual(missing_header_body.get("error", {}).get("code"), "invalid_request")
+
+        invalid_body_status, invalid_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/feedback-reports",
+            body={},
+            headers={"Idempotency-Key": "feedback-invalid-body-001"},
+        )
+        self.assertEqual(invalid_body_status, 400, invalid_body)
+        self.assertEqual(invalid_body.get("error", {}).get("code"), "invalid_request")
+
+        missing_session_status, missing_session_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/feedback-reports",
+            body={"session_id": "sess_missing_feedback_001"},
+            headers={"Idempotency-Key": "feedback-missing-session-001"},
+        )
+        self.assertEqual(missing_session_status, 404, missing_session_body)
+        self.assertEqual(missing_session_body.get("error", {}).get("code"), "not_found")
+
+        get_missing_status, get_missing_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/feedback-reports/fb_missing_001",
+        )
+        self.assertEqual(get_missing_status, 404, get_missing_body)
+        self.assertEqual(get_missing_body.get("error", {}).get("code"), "not_found")
+
+    def _create_interview_session_entity_for_feedback(self) -> str:
+        job_spec_id = self._create_job_spec_entity_for_interview()
+        candidate_id = self._create_candidate_entity_for_interview()
+        create_status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions",
+            body={
+                "job_spec_id": job_spec_id,
+                "candidate_id": candidate_id,
+                "mode": "mock_interview",
+            },
+        )
+        self.assertEqual(create_status, 201, create_body)
+
+        session_data = create_body.get("data", {})
+        session_id = session_data.get("session_id")
+        self.assertIsInstance(session_id, str)
+        self.assertTrue(session_id)
+        assert isinstance(session_id, str)
+        return session_id
+
+    def _create_job_spec_entity_for_interview(self) -> str:
+        create_payload = {
+            "source_type": "text",
+            "source_value": (
+                "Backend Engineer\n"
+                "Responsibilities:\n"
+                "- Build Python services.\n"
+                "Requirements:\n"
+                "- Strong SQL.\n"
+                "Preferred Qualifications:\n"
+                "- API design.\n"
+            ),
+        }
+        idempotency_key = f"interview-job-{uuid.uuid4()}"
+        create_status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/job-ingestions",
+            body=create_payload,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        self.assertEqual(create_status, 202, create_body)
+        ingestion_id = self._assert_ingestion_accepted_response(create_body)
+
+        get_status, get_body = self._wait_for_ingestion_status(ingestion_id)
+        self.assertEqual(get_status, 200, get_body)
+        data = get_body.get("data", {})
+        result = data.get("result", {}) if isinstance(data, dict) else {}
+        job_spec_id = result.get("entity_id") if isinstance(result, dict) else None
+        self.assertIsInstance(job_spec_id, str)
+        self.assertTrue(job_spec_id)
+        assert isinstance(job_spec_id, str)
+        return job_spec_id
+
+    def _create_candidate_entity_for_interview(self) -> str:
+        payload = {
+            "candidate_id": "cand_contract_interview_001",
+            "cv_text": (
+                "Alex Kim\n"
+                "Staff Engineer\n"
+                "Acme Corp | Senior Engineer | 2020-01 - Present\n"
+                "Built reliable APIs in Python and SQL.\n"
+            ),
+            "story_notes": ["Reduced latency by 35% and improved deployment success rate to 98%."],
+            "target_roles": ["Staff Engineer"],
+        }
+        idempotency_key = f"interview-candidate-{uuid.uuid4()}"
+        create_status, create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/candidate-ingestions",
+            body=payload,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        self.assertEqual(create_status, 202, create_body)
+        ingestion_id = self._assert_ingestion_accepted_response(create_body)
+
+        get_status, get_body = self._wait_for_candidate_ingestion_status(ingestion_id)
+        self.assertEqual(get_status, 200, get_body)
+        data = get_body.get("data", {})
+        result = data.get("result", {}) if isinstance(data, dict) else {}
+        candidate_id = result.get("entity_id") if isinstance(result, dict) else None
+        self.assertIsInstance(candidate_id, str)
+        self.assertTrue(candidate_id)
+        assert isinstance(candidate_id, str)
+        return candidate_id
+
     def _wait_for_ingestion_status(self, ingestion_id: str) -> tuple[int, dict]:
         deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
         last_status = 0
@@ -258,6 +1186,20 @@ class JobIngestionApiContractTest(unittest.TestCase):
         while time.monotonic() < deadline:
             status, body = _request_json(
                 self.base_url, "GET", f"{API_PREFIX}/job-ingestions/{ingestion_id}"
+            )
+            last_status, last_body = status, body
+            if status == 200:
+                return status, body
+            time.sleep(0.1)
+        return last_status, last_body
+
+    def _wait_for_candidate_ingestion_status(self, ingestion_id: str) -> tuple[int, dict]:
+        deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
+        last_status = 0
+        last_body: dict = {}
+        while time.monotonic() < deadline:
+            status, body = _request_json(
+                self.base_url, "GET", f"{API_PREFIX}/candidate-ingestions/{ingestion_id}"
             )
             last_status, last_body = status, body
             if status == 200:
@@ -297,6 +1239,194 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(row[2], payload["source_type"])
         self.assertEqual(row[3], payload["source_value"])
         self.assertEqual(row[4], "queued")
+
+    def _assert_candidate_ingestion_row_persisted(
+        self, ingestion_id: str, payload: dict, idempotency_key: str
+    ) -> None:
+        deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
+        row = None
+        while time.monotonic() < deadline:
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                row = conn.execute(
+                    """
+                    SELECT ingestion_id, idempotency_key, candidate_id, cv_text, cv_document_ref, story_notes_json, target_roles_json, status
+                    FROM candidate_ingestions
+                    WHERE ingestion_id = ?
+                    """,
+                    (ingestion_id,),
+                ).fetchone()
+            if row:
+                break
+            time.sleep(0.1)
+
+        self.assertIsNotNone(
+            row,
+            (
+                "POST response returned an ingestion_id that was not persisted into "
+                f"the bootstrapped database at {self.db_path}."
+            ),
+        )
+        assert row is not None
+        self.assertEqual(row[0], ingestion_id)
+        self.assertEqual(row[1], idempotency_key)
+        self.assertEqual(row[2], payload["candidate_id"])
+        self.assertEqual(row[3], payload.get("cv_text"))
+        self.assertEqual(row[4], payload.get("cv_document_ref"))
+        self.assertEqual(row[5], json.dumps(payload.get("story_notes"), separators=(",", ":")))
+        self.assertEqual(row[6], json.dumps(payload.get("target_roles"), separators=(",", ":")))
+        self.assertEqual(row[7], "queued")
+
+    def _assert_candidate_profile_row_persisted(self, *, ingestion_id: str, candidate_id: str) -> None:
+        deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
+        row = None
+        while time.monotonic() < deadline:
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                row = conn.execute(
+                    """
+                    SELECT candidate_id, ingestion_id, summary, experience_json, skills_json, parse_confidence, version
+                    FROM candidate_profiles
+                    WHERE candidate_id = ?
+                    """,
+                    (candidate_id,),
+                ).fetchone()
+            if row:
+                break
+            time.sleep(0.1)
+
+        self.assertIsNotNone(
+            row,
+            (
+                "Candidate profile row was not persisted for candidate ingestion "
+                f"{ingestion_id} in database {self.db_path}."
+            ),
+        )
+        assert row is not None
+        self.assertEqual(row[0], candidate_id)
+        self.assertEqual(row[1], ingestion_id)
+        self.assertIsInstance(row[2], str)
+        self.assertTrue(row[2])
+        experience = json.loads(row[3])
+        self.assertIsInstance(experience, list)
+        self.assertGreater(len(experience), 0)
+        skills = json.loads(row[4])
+        self.assertIsInstance(skills, dict)
+        self.assertGreater(len(skills), 0)
+        self.assertGreaterEqual(float(row[5]), 0.0)
+        self.assertLessEqual(float(row[5]), 1.0)
+        self.assertGreaterEqual(int(row[6]), 1)
+
+    def _assert_candidate_storybank_rows_persisted(self, *, candidate_id: str) -> None:
+        deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
+        rows = []
+        while time.monotonic() < deadline:
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT story_id, situation, task, action, result, competencies_json, metrics_json, evidence_quality
+                    FROM candidate_storybank
+                    WHERE candidate_id = ?
+                    ORDER BY created_at ASC, story_id ASC
+                    """,
+                    (candidate_id,),
+                ).fetchall()
+            if rows:
+                break
+            time.sleep(0.1)
+
+        self.assertGreaterEqual(len(rows), 1, f"No candidate_storybank rows persisted for candidate_id={candidate_id}")
+        for row in rows:
+            self.assertTrue(row[0])
+            self.assertTrue(row[1])
+            self.assertTrue(row[2])
+            self.assertTrue(row[3])
+            self.assertTrue(row[4])
+            competencies = json.loads(row[5])
+            self.assertIsInstance(competencies, list)
+            self.assertGreaterEqual(len(competencies), 1)
+            if row[6] is not None:
+                metrics = json.loads(row[6])
+                self.assertIsInstance(metrics, list)
+            self.assertGreaterEqual(float(row[7]), 0.0)
+        self.assertLessEqual(float(row[7]), 1.0)
+
+    def _assert_interview_session_row_persisted(self, *, session_id: str, job_spec_id: str, candidate_id: str) -> None:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT session_id, job_spec_id, candidate_id, mode, status, version
+                FROM interview_sessions
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+
+        self.assertIsNotNone(row, f"Interview session row missing for session_id={session_id}")
+        assert row is not None
+        self.assertEqual(row[0], session_id)
+        self.assertEqual(row[1], job_spec_id)
+        self.assertEqual(row[2], candidate_id)
+        self.assertIn(row[3], {"mock_interview", "drill", "negotiation"})
+        self.assertIn(row[4], {"in_progress", "completed"})
+        self.assertGreaterEqual(int(row[5]), 1)
+
+    def _assert_interview_response_row_persisted(self, *, session_id: str, idempotency_key: str) -> None:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT session_id, idempotency_key, question_id, response_text, score
+                FROM interview_session_responses
+                WHERE session_id = ? AND idempotency_key = ?
+                """,
+                (session_id, idempotency_key),
+            ).fetchone()
+
+        self.assertIsNotNone(
+            row,
+            f"Interview response row missing for session_id={session_id}, idempotency_key={idempotency_key}",
+        )
+        assert row is not None
+        self.assertEqual(row[0], session_id)
+        self.assertEqual(row[1], idempotency_key)
+        self.assertTrue(row[2])
+        self.assertTrue(row[3])
+        self.assertGreaterEqual(float(row[4]), 0.0)
+        self.assertLessEqual(float(row[4]), 100.0)
+
+    def _assert_feedback_report_row_persisted(
+        self,
+        *,
+        feedback_report_id: str,
+        session_id: str,
+        idempotency_key: str,
+    ) -> None:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT feedback_report_id, session_id, idempotency_key, payload_json, version, supersedes_feedback_report_id
+                FROM feedback_reports
+                WHERE feedback_report_id = ?
+                """,
+                (feedback_report_id,),
+            ).fetchone()
+
+        self.assertIsNotNone(row, f"Feedback report row missing for feedback_report_id={feedback_report_id}")
+        assert row is not None
+        self.assertEqual(row[0], feedback_report_id)
+        self.assertEqual(row[1], session_id)
+        self.assertEqual(row[2], idempotency_key)
+        payload = json.loads(str(row[3]))
+        self.assertEqual(payload.get("feedback_report_id"), feedback_report_id)
+        self.assertEqual(payload.get("session_id"), session_id)
+        self.assertIsInstance(payload.get("overall_score"), (int, float))
+        self.assertGreaterEqual(float(payload.get("overall_score", 0.0)), 0.0)
+        self.assertLessEqual(float(payload.get("overall_score", 0.0)), 100.0)
+        self.assertIsInstance(payload.get("answer_rewrites"), list)
+        self.assertGreaterEqual(len(payload.get("answer_rewrites", [])), 1)
+        self.assertIsInstance(payload.get("action_plan"), list)
+        self.assertEqual(len(payload.get("action_plan", [])), 30)
+        self.assertEqual([entry.get("day") for entry in payload.get("action_plan", [])], list(range(1, 31)))
+        self.assertEqual(int(row[4]), int(payload.get("version", 0)))
+        self.assertEqual(payload.get("supersedes_feedback_report_id"), row[5])
 
     def _assert_ingestion_accepted_response(self, body: dict) -> str:
         self.assertIsInstance(body, dict)

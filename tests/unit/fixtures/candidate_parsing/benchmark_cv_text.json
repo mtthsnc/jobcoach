@@ -1,0 +1,17 @@
+{
+  "case_id": "cv_text_basic",
+  "input": {
+    "ingestion_id": "ing_case001",
+    "candidate_id": "cand_case001",
+    "cv_text": "Maya Rivera\nSenior Software Engineer\nAcme Corp | Senior Backend Engineer | 2021-02 - Present\nBuilt Python APIs and SQL workflows.\nMentored engineers across cross-functional initiatives.",
+    "cv_document_ref": null,
+    "target_roles": ["Staff Backend Engineer"],
+    "story_notes": ["Led reliability initiatives for API platform."]
+  },
+  "expectations": {
+    "candidate_id": "cand_case001",
+    "summary": "Maya Rivera",
+    "experience_min_items": 1,
+    "required_skill_keys": ["python", "sql"]
+  }
+}

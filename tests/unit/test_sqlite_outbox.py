@@ -7,7 +7,7 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
-from services.orchestrator.outbox.sqlite_outbox import OutboxEvent, SQLiteOutboxStore
+from packages.eventing.outbox import OutboxEvent, SQLiteOutboxStore
 
 
 class SQLiteOutboxStoreTest(unittest.TestCase):

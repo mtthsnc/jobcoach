@@ -51,6 +51,7 @@ Candidates prepare too broadly and cannot map their experience to specific hirin
 
 - Job extraction tool (Defuddle-like): cleaner + section parser + skill normalizer.
 - Adaptive interview coach engine: question planner + follow-up controller + rubric scorer.
+- Interview session state manager: turn history, competency trajectory, and reviewer override audit.
 
 ## 7. Data Contracts
 
@@ -62,7 +63,7 @@ Canonical entities:
 - `FeedbackReport`
 - `TrajectoryPlan`
 
-Contract artifacts live in `docs/artifacts/`.
+Contract artifacts live in `schemas/openapi/` and `schemas/jsonschema/`.
 
 ## 8. Quality and Safety Constraints
 
@@ -87,7 +88,7 @@ Contract artifacts live in `docs/artifacts/`.
 - M0: Contracts validated in CI.
 - M1: >= 90% valid `JobSpec` generation on benchmark set.
 - M2: >= 85% valid candidate profile parse on benchmark set.
-- M3: Interview relevance score >= 0.80.
+- M3: Interview relevance score >= 0.80 and session-schema validity >= 95%.
 - M4: Every gap feedback item includes evidence and action.
 - M5: Trend dashboard correctly computes improvement metrics.
 

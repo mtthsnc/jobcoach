@@ -2,32 +2,31 @@
 
 ## Active Milestone
 
-`Monorepo Transition` (Pre-roadmap structural stream)
+`M5` (Product Roadmap)
 
 ## Active Task
 
-- Task ID: `MONO-B`
-- Task: Execute Monorepo Phase B (Schema/Tooling Relocation).
-- Why now: Phase A preparation is complete; transition can proceed with controlled path moves and compatibility shims.
+- Task ID: `M5-001`
+- Task: Add `TrajectoryPlan` orchestration contract endpoints and storage migration.
+- Why now: `M5-PLAN-001` is complete, and M5 execution should begin with contract/storage foundations for trajectory planning.
 
 ## Exact Next Steps
 
-1. Read `docs/monorepo-fresh-context.md` and use it as execution authority for transition phases.
-2. Use `docs/monorepo-phase-a-freeze.md` as the frozen mapping/checksum authority for planned moves.
-3. Relocate schema assets to `schemas/openapi` and `schemas/jsonschema`.
-4. Relocate reusable scripts to `tools/scripts`.
-5. Add compatibility links/stubs for legacy paths and update references incrementally.
-6. Keep behavior unchanged while completing Phase B.
+1. Extend OpenAPI for trajectory-plan create/get endpoints and request/response schemas (including idempotency/error semantics).
+2. Add SQL migration(s) for `trajectory_plans` persistence with idempotency support and retrieval indexes.
+3. Implement API gateway handler + repository flows for create/get with deterministic response envelopes.
+4. Add contract/unit coverage for happy path, validation failures, idempotency replay/conflict, and not-found retrieval.
+5. Update planning docs to mark `M5-001` complete and move pointer to `M5-002`.
 
 ## Validation Required
 
-- Existing targets still pass after relocation:
+- Confirm quality gates remain green:
   - `make test`
   - `make validate-openapi`
   - `make migrate-up`
   - `make migrate-down`
-  - `make contract-test` (use escalated run in this environment if port binding is blocked).
+  - `make contract-test`
 
 ## Return Pointer
 
-After monorepo phases complete, set this file back to roadmap execution at `M1-002` unless superseded.
+After `M5-001` is complete, execute `M5-002`.

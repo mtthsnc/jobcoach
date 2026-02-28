@@ -1,0 +1,16 @@
+{
+  "case_id": "document_ref_fallback",
+  "input": {
+    "ingestion_id": "ing_case002",
+    "candidate_id": null,
+    "cv_text": null,
+    "cv_document_ref": "s3://candidate-resumes/case002.pdf",
+    "target_roles": ["Platform Engineer"],
+    "story_notes": ["Automated incident communication updates."]
+  },
+  "expectations": {
+    "candidate_id": "cand_case002",
+    "experience_min_items": 1,
+    "required_skill_keys": ["communication"]
+  }
+}

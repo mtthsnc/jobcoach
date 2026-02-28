@@ -26,8 +26,9 @@ If chat context runs out, a new session should resume by following this exact or
 - `docs/templates/handoff-template.md`: Required format for end-of-session handoff.
 - `docs/templates/task-template.md`: Template for adding new backlog tasks.
 - `docs/templates/resume-prompt.md`: Copy-paste prompt for starting a fresh session.
-- `docs/artifacts/openapi-m0-m2.yaml`: API contract starter.
-- `docs/artifacts/core-schemas.json`: Core JSON schemas.
+- `schemas/openapi/openapi-m0-m2.yaml`: Canonical API contract artifact.
+- `schemas/openapi/openapi.yaml`: Canonical runtime OpenAPI pointer.
+- `schemas/jsonschema/core-schemas.json`: Canonical core JSON schemas artifact.
 
 ## Update Rules
 

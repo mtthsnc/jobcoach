@@ -201,3 +201,1025 @@ Use UTC timestamps. Append entries only.
   - Local port binding remains restricted in sandbox; `make contract-test` requires escalation in this environment.
 - Next pointer:
   - Execute `MONO-B` schema/tooling relocation with compatibility shims and unchanged behavior.
+
+- START
+- 2026-02-28T18:46:50Z
+- Execute `MONO-B` schema/tooling relocation with compatibility shims and no behavior change.
+- Task IDs: MONO-B
+- Changes made:
+  - Started Phase B relocation run from active pointer in `docs/NEXT_ACTION.md`.
+- Validation evidence:
+  - Planned: `make test`, `make validate-openapi`, `make migrate-up`, `make migrate-down`, `make contract-test`.
+- Blockers / risks:
+  - `make` may fail in this environment if Xcode license is not accepted; use equivalent direct commands if needed.
+- Next pointer:
+  - Complete MONO-B relocation and update planning docs.
+
+- END
+- 2026-02-28T18:46:50Z
+- Execute `MONO-B` schema/tooling relocation with compatibility shims and no behavior change.
+- Task IDs: MONO-B
+- Changes made:
+  - Moved OpenAPI and core JSON schema artifacts to canonical paths under `schemas/openapi` and `schemas/jsonschema`.
+  - Moved reusable scripts to `tools/scripts` and left `scripts/*` shim entrypoints that forward to canonical scripts.
+  - Added compatibility symlinks for legacy artifact/runtime paths: `docs/artifacts/*` and `apps/api-gateway/openapi/openapi.yaml`.
+  - Updated canonical references in `Makefile`, schema validator defaults, contract artifact tests, and docs file map.
+  - Updated task tracker and moved `NEXT_ACTION` pointer to `MONO-C`.
+- Validation evidence:
+  - `python3 -m unittest -v \$(find tests -type f -name 'test_*.py' ! -path 'tests/contracts/*' ! -path '*/__pycache__/*' | LC_ALL=C sort)`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+  - `MIGRATE_DB_PATH=.tmp/migrate-local.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh up`
+  - `MIGRATE_DB_PATH=.tmp/migrate-local.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh down`
+  - `JOBCOACH_API_BASE_URL=http://127.0.0.1:8000 JOBCOACH_API_CMD=\"python3 apps/api-gateway/serve.py\" python3 -m unittest discover -s tests/contracts -p 'test_*.py' -v`
+- Blockers / risks:
+  - `make` invocation is blocked in this environment by an unaccepted Xcode license; equivalent commands above passed.
+  - `contract-test` still requires escalated execution in this environment for local bind/run behavior.
+- Next pointer:
+  - Execute `MONO-C` shared package extraction from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T18:54:06Z
+- Execute `MONO-C` shared package extraction with compatibility shims.
+- Task IDs: MONO-C
+- Changes made:
+  - Started Phase C extraction for shared contracts/db/eventing modules under `packages/`.
+- Validation evidence:
+  - Planned: `make test`, `make validate-openapi`, `make migrate-up`, `make migrate-down`, `make contract-test`.
+- Blockers / risks:
+  - `make` may fail in this environment if Xcode license is not accepted; run equivalent direct commands when needed.
+- Next pointer:
+  - Complete MONO-C extraction and update planning docs.
+
+- END
+- 2026-02-28T18:54:06Z
+- Execute `MONO-C` shared package extraction with compatibility shims.
+- Task IDs: MONO-C
+- Changes made:
+  - Added reusable package modules: `packages/contracts/artifacts.py`, `packages/db/sqlite.py`, and `packages/eventing/outbox.py`.
+  - Updated API repository and schema validator to consume extracted package modules.
+  - Replaced service outbox implementation with a compatibility re-export shim to `packages/eventing/outbox.py`.
+  - Added API entrypoint sys.path bootstrapping so `python3 apps/api-gateway/serve.py` resolves extracted packages in contract-test environment.
+  - Updated contract artifact tests to consume canonical artifact paths via `packages/contracts/artifacts.py`.
+  - Updated task tracker and moved `NEXT_ACTION` pointer to `MONO-D`.
+- Validation evidence:
+  - `python3 -m unittest -v \$(find tests -type f -name 'test_*.py' ! -path 'tests/contracts/*' ! -path '*/__pycache__/*' | LC_ALL=C sort)`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+  - `MIGRATE_DB_PATH=.tmp/migrate-local.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh up`
+  - `MIGRATE_DB_PATH=.tmp/migrate-local.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh down`
+  - `JOBCOACH_API_BASE_URL=http://127.0.0.1:8000 JOBCOACH_API_CMD=\"python3 apps/api-gateway/serve.py\" python3 -m unittest discover -s tests/contracts -p 'test_*.py' -v`
+- Blockers / risks:
+  - `make` invocation remains blocked by an unaccepted Xcode license in this environment; equivalent commands above passed.
+  - Contract test execution still requires escalated run behavior in this environment.
+- Next pointer:
+  - Execute `MONO-D` cleanup and stale-path sweep from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T18:56:26Z
+- Execute `MONO-D` cleanup/hardening and transition return to roadmap.
+- Task IDs: MONO-D
+- Changes made:
+  - Started Phase D cleanup run to remove temporary compatibility shims and stale paths.
+- Validation evidence:
+  - Planned: `make test`, `make validate-openapi`, `make migrate-up`, `make migrate-down`, `make contract-test`.
+- Blockers / risks:
+  - `make` may fail in this environment if Xcode license is not accepted; run equivalent direct commands when needed.
+- Next pointer:
+  - Complete MONO-D cleanup and restore roadmap pointer to `M1-002`.
+
+- END
+- 2026-02-28T18:56:26Z
+- Execute `MONO-D` cleanup/hardening and transition return to roadmap.
+- Task IDs: MONO-D
+- Changes made:
+  - Removed temporary compatibility shims: legacy `scripts/*` wrappers, legacy `docs/artifacts/*` links, API runtime compatibility link under `apps/api-gateway/openapi`, and service outbox re-export shim.
+  - Updated remaining imports to canonical package paths (unit outbox test now imports `packages.eventing.outbox`).
+  - Swept repository for stale paths and retained legacy references only in historical/freeze docs.
+  - Updated task tracker and returned `NEXT_ACTION` to roadmap task `M1-002`.
+- Validation evidence:
+  - `python3 -m unittest -v \$(find tests -type f -name 'test_*.py' ! -path 'tests/contracts/*' ! -path '*/__pycache__/*' | LC_ALL=C sort)`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+  - `MIGRATE_DB_PATH=.tmp/migrate-local.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh up`
+  - `MIGRATE_DB_PATH=.tmp/migrate-local.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh down`
+  - `JOBCOACH_API_BASE_URL=http://127.0.0.1:8000 JOBCOACH_API_CMD=\"python3 apps/api-gateway/serve.py\" python3 -m unittest discover -s tests/contracts -p 'test_*.py' -v`
+- Blockers / risks:
+  - `make` invocation remains blocked by an unaccepted Xcode license in this environment; equivalent commands above passed.
+  - Contract test execution still requires escalated run behavior in this environment.
+- Next pointer:
+  - Execute `M1-002` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T19:08:55Z
+- Execute `M1-002` job extraction worker (fetch, clean, segment).
+- Task IDs: M1-002
+- Changes made:
+  - Started implementation of deterministic extraction worker and benchmark corpus validation.
+- Validation evidence:
+  - Planned: unit + contract + schema + migration validation gates.
+- Blockers / risks:
+  - `make` may fail in this environment if Xcode license is not accepted; run equivalent direct commands when needed.
+- Next pointer:
+  - Complete M1-002 implementation and update roadmap pointer.
+
+- END
+- 2026-02-28T19:08:55Z
+- Execute `M1-002` job extraction worker (fetch, clean, segment).
+- Task IDs: M1-002
+- Changes made:
+  - Added deterministic extraction worker at `services/job-extraction/worker.py` with explicit stages: source fetch, text cleanup, heading-based section segmentation.
+  - Added benchmark fixture corpus under `tests/unit/fixtures/job_extraction/` covering text, alternative heading variants, HTML URL source, and document reference source.
+  - Added unit benchmark suite `tests/unit/test_job_extraction_worker.py` to enforce parsed section coverage and role title extraction on the corpus.
+- Validation evidence:
+  - `python3 -m unittest -v tests/unit/test_job_extraction_worker.py`
+  - `python3 -m unittest -v \$(find tests -type f -name 'test_*.py' ! -path 'tests/contracts/*' ! -path '*/__pycache__/*' | LC_ALL=C sort)`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+  - `MIGRATE_DB_PATH=.tmp/migrate-local.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh up`
+  - `MIGRATE_DB_PATH=.tmp/migrate-local.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh down`
+  - `JOBCOACH_API_BASE_URL=http://127.0.0.1:8000 JOBCOACH_API_CMD=\"python3 apps/api-gateway/serve.py\" python3 -m unittest discover -s tests/contracts -p 'test_*.py' -v`
+- Blockers / risks:
+  - `make` invocation remains blocked by an unaccepted Xcode license in this environment; equivalent commands above passed.
+  - Contract test execution still requires escalated run behavior in this environment.
+- Next pointer:
+  - Execute `M1-003` taxonomy normalization stub + mappings from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T19:12:07Z
+- Execute `M1-003` taxonomy normalization stub + mappings.
+- Task IDs: M1-003
+- Changes made:
+  - Started deterministic taxonomy normalization module and mapping-fixture implementation.
+- Validation evidence:
+  - Planned: unit + contract + schema + migration validation gates.
+- Blockers / risks:
+  - `make` may fail in this environment if Xcode license is not accepted; run equivalent direct commands when needed.
+- Next pointer:
+  - Complete M1-003 and update roadmap pointer.
+
+- END
+- 2026-02-28T19:12:07Z
+- Execute `M1-003` taxonomy normalization stub + mappings.
+- Task IDs: M1-003
+- Changes made:
+  - Added taxonomy normalization stub `services/taxonomy/normalizer.py` with deterministic alias mapping and unknown-term fallback.
+  - Added canonical term mappings in `services/taxonomy/mappings/skill_terms.json`.
+  - Added bridge helper `normalize_job_requirement_terms(...)` to wire extraction output skill terms toward `M1-004` persistence.
+  - Added fixture-driven tests in `tests/unit/test_taxonomy_normalizer.py` with cases from `tests/unit/fixtures/taxonomy/normalization_cases.json`.
+- Validation evidence:
+  - `python3 -m unittest -v tests/unit/test_taxonomy_normalizer.py`
+  - `python3 -m unittest -v \$(find tests -type f -name 'test_*.py' ! -path 'tests/contracts/*' ! -path '*/__pycache__/*' | LC_ALL=C sort)`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+  - `MIGRATE_DB_PATH=.tmp/migrate-local.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh up`
+  - `MIGRATE_DB_PATH=.tmp/migrate-local.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh down`
+  - `JOBCOACH_API_BASE_URL=http://127.0.0.1:8000 JOBCOACH_API_CMD=\"python3 apps/api-gateway/serve.py\" python3 -m unittest discover -s tests/contracts -p 'test_*.py' -v`
+- Blockers / risks:
+  - `make` invocation remains blocked by an unaccepted Xcode license in this environment; equivalent commands above passed.
+  - Contract test execution still requires escalated run behavior in this environment.
+- Next pointer:
+  - Execute `M1-004` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T19:13:20Z
+- Execute `M1-004` JobSpec persistence wiring and retrieval endpoint.
+- Task IDs: M1-004
+- Changes made:
+  - Started implementation of ingestion-linked `JobSpec` persistence with extraction/taxonomy/schema-validation wiring.
+- Validation evidence:
+  - Planned: targeted unit tests + ingestion contract tests + OpenAPI structural check.
+- Blockers / risks:
+  - Local command sandbox is read-only for temp-file creation; full test runs require escalated execution.
+- Next pointer:
+  - Complete `M1-004`, then move pointer to `M1-005`.
+
+- END
+- 2026-02-28T19:24:26Z
+- Execute `M1-004` JobSpec persistence wiring and retrieval endpoint.
+- Task IDs: M1-004
+- Changes made:
+  - Extended API repository with `job_specs` persistence (`persist_job_spec`) and retrieval (`get_job_spec_by_id`) plus JSON encode/decode helpers for structured columns.
+  - Wired ingestion create flow to build `JobSpec` from extraction + taxonomy normalization output, validate against core schema before write, and store ingestion `result_job_spec_id`.
+  - Added `GET /v1/job-specs/{job_spec_id}` endpoint returning persisted `JobSpec`.
+  - Added `tests/unit/test_job_spec_persistence.py` to verify schema-valid persistence and retrieval through the WSGI app on a bootstrapped SQLite schema.
+  - Updated planning docs: marked `M1-004` done in `docs/tasklist.md` and moved `docs/NEXT_ACTION.md` to `M1-005`.
+- Validation evidence:
+  - `python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `python3 -m unittest -v tests/unit/test_job_extraction_worker.py tests/unit/test_taxonomy_normalizer.py tests/unit/test_sqlite_outbox.py`
+  - `python3 -m unittest tests/contracts/test_job_ingestions_api_contract.py -v` with `JOBCOACH_API_CMD=\"python3 apps/api-gateway/serve.py\"`
+  - `python3 -m unittest -v tests/contracts/test_schema_validation.py tests/contracts/test_contract_artifacts.py`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+- Blockers / risks:
+  - In this environment, write/tempfile operations are blocked in the default sandbox; commands above required escalated execution.
+- Next pointer:
+  - Execute `M1-005` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T19:26:10Z
+- Execute `M1-005` review patch endpoint with optimistic locking and audit persistence.
+- Task IDs: M1-005
+- Changes made:
+  - Started implementation of job spec review patch flow and conflict handling.
+- Validation evidence:
+  - Planned: unit tests, API contract tests, and OpenAPI structural checks.
+- Blockers / risks:
+  - Default sandbox blocks tempfile writes and local server launch; validation requires escalated runs.
+- Next pointer:
+  - Complete `M1-005`, then move pointer to `M1-006`.
+
+- END
+- 2026-02-28T19:31:35Z
+- Execute `M1-005` review patch endpoint with optimistic locking and audit persistence.
+- Task IDs: M1-005
+- Changes made:
+  - Added `PATCH /v1/job-specs/{job_spec_id}/review` routing and handler with request validation and schema re-validation after patch application.
+  - Added immutable-field and supported-field patch guardrails plus deep-merge patch application for nested objects.
+  - Implemented repository-side optimistic locking update for `job_specs`, version increment, and audit write to `job_spec_reviews`.
+  - Added/extended tests for review success path, persisted audit row verification, and `409 version_conflict` behavior (unit + API contract coverage).
+  - Updated planning docs: marked `M1-005` done, set `NEXT_ACTION` to `M1-006`.
+- Validation evidence:
+  - `python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `python3 -m unittest -v tests/unit/test_job_extraction_worker.py tests/unit/test_taxonomy_normalizer.py tests/unit/test_sqlite_outbox.py`
+  - `JOBCOACH_API_CMD=\"python3 apps/api-gateway/serve.py\" JOBCOACH_API_BASE_URL=\"http://127.0.0.1:8000\" python3 -m unittest tests/contracts/test_job_ingestions_api_contract.py -v`
+  - `python3 -m unittest -v tests/contracts/test_schema_validation.py tests/contracts/test_contract_artifacts.py`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+- Blockers / risks:
+  - Validation commands required escalated execution due read-only/default sandbox constraints in this environment.
+- Next pointer:
+  - Execute `M1-006` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T19:33:20Z
+- Execute `M1-006` extraction benchmark suite + threshold gates.
+- Task IDs: M1-006
+- Changes made:
+  - Started implementation of deterministic extraction benchmark scoring and CI/local threshold gating.
+- Validation evidence:
+  - Planned: `make test`, `make validate-openapi`, `make migrate-up`, `make migrate-down`, `make contract-test`.
+- Blockers / risks:
+  - Default sandbox restrictions require escalated execution for tempfile writes and local API launch during validations.
+- Next pointer:
+  - Complete `M1-006`, then move pointer to `M2-001`.
+
+- END
+- 2026-02-28T19:44:10Z
+- Execute `M1-006` extraction benchmark suite + threshold gates.
+- Task IDs: M1-006
+- Changes made:
+  - Added deterministic extraction benchmark runner at `services/quality-eval/benchmark/extraction_benchmark.py` with aggregate threshold metrics:
+    role-title accuracy, section coverage, skill precision/recall, and JobSpec schema-valid rate.
+  - Added benchmark module package init and expanded extraction fixtures with expected normalized skill IDs for skill-mapping evaluation.
+  - Added unit coverage for benchmark report generation and threshold-failure behavior in `tests/unit/test_extraction_benchmark_runner.py`.
+  - Wired benchmark gate into `make test` and added explicit `benchmark-extraction` target/report path in `Makefile`.
+  - Updated CI placeholder workflow to emit benchmark report artifact contents (`.tmp/extraction-benchmark-report.json`).
+  - Updated quality-eval service README to reflect active benchmark + schema validation role.
+  - Updated planning docs: marked `M1-006` done and moved `NEXT_ACTION` to `M2-001`.
+- Validation evidence:
+  - `make test`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make contract-test`
+- Blockers / risks:
+  - Validation commands required escalated execution in this environment due read-only/default sandbox behavior.
+- Next pointer:
+  - Execute `M2-001` from `docs/NEXT_ACTION.md`.
+
+- END
+- 2026-02-28T19:53:08Z
+- Execute `M2-001` candidate ingestion create/status endpoints.
+- Task IDs: M2-001
+- Changes made:
+  - Added `POST /v1/candidate-ingestions` and `GET /v1/candidate-ingestions/{ingestion_id}` routing/handlers in `apps/api-gateway/api_gateway/app.py`.
+  - Added candidate-ingestion request validation for OpenAPI-aligned payload shape, required idempotency key, and XOR CV source constraints (`cv_text` vs `cv_document_ref`).
+  - Added candidate-ingestion repository support in `apps/api-gateway/api_gateway/repository.py`:
+    `create_or_get_candidate(...)`, `get_candidate_by_id(...)`, and typed row mapping for `candidate_ingestions`.
+  - Added candidate contract coverage in `tests/contracts/test_job_ingestions_api_contract.py`:
+    create/get happy path, candidate-row persistence assertion, and idempotency conflict behavior.
+  - Added candidate unit coverage in `tests/unit/test_job_spec_persistence.py`:
+    create/get persistence, idempotency conflict, and invalid CV source validation behavior.
+  - Updated planning docs: marked `M2-001` done and advanced `NEXT_ACTION` to `M2-002`.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+- Blockers / risks:
+  - Validation required escalated execution because default sandbox temp directories were not writable.
+- Next pointer:
+  - Execute `M2-002` from `docs/NEXT_ACTION.md`.
+
+- END
+- 2026-02-28T20:02:12Z
+- Execute `M2-002` CV parser into structured experiences.
+- Task IDs: M2-002
+- Changes made:
+  - Added deterministic parser module at `services/candidate-profile/parser.py` for summary extraction, structured experience parsing, skill scoring, and parse-confidence estimation.
+  - Wired parser into candidate-ingestion create flow in `apps/api-gateway/api_gateway/app.py` with schema validation (`CandidateProfile`) before persistence.
+  - Extended repository in `apps/api-gateway/api_gateway/repository.py` with `persist_candidate_profile(...)`, candidate-profile retrieval, and ingestion result linkage (`result_candidate_id`).
+  - Added fixture-driven parser tests in `tests/unit/test_candidate_profile_parser.py` with inputs under `tests/unit/fixtures/candidate_parsing/`.
+  - Expanded API/unit coverage to assert candidate-profile persistence and schema-valid payloads from candidate ingestions.
+  - Updated candidate-profile service README from scaffold status to active responsibility documentation.
+  - Updated planning docs: marked `M2-002` done and advanced `NEXT_ACTION` to `M2-003`.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_candidate_profile_parser.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+- Blockers / risks:
+  - Validation commands that create temporary databases / launch local server require escalated execution in this environment.
+- Next pointer:
+  - Execute `M2-003` from `docs/NEXT_ACTION.md`.
+
+- END
+- 2026-02-28T20:06:15Z
+- Execute `M2-003` storybank generator with quality scoring.
+- Task IDs: M2-003
+- Changes made:
+  - Added deterministic story generator at `services/candidate-profile/storybank.py` to produce STAR-structured entries with competency tagging and bounded `evidence_quality` scores.
+  - Wired story generation into candidate-ingestion flow in `apps/api-gateway/api_gateway/app.py`, including schema validation of `CandidateProfile` payloads that include `storybank`.
+  - Extended repository in `apps/api-gateway/api_gateway/repository.py` with `replace_candidate_storybank(...)` and `get_candidate_storybank(...)` for `candidate_storybank` persistence.
+  - Expanded unit and contract tests to assert storybank persistence, competency presence, and evidence-quality bounds.
+  - Added fixture-driven generator coverage in `tests/unit/test_candidate_storybank_generator.py` with cases under `tests/unit/fixtures/candidate_storybank/`.
+  - Updated candidate-profile service README to include storybank generation responsibilities.
+  - Updated planning docs: marked `M2-003` done and advanced `NEXT_ACTION` to `M2-004`.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_candidate_storybank_generator.py tests/unit/test_candidate_profile_parser.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+- Blockers / risks:
+  - Validation commands that create temporary SQLite databases or launch local API processes require escalated execution in this environment.
+- Next pointer:
+  - Execute `M2-004` from `docs/NEXT_ACTION.md`.
+
+- END
+- 2026-02-28T20:10:22Z
+- Execute `M2-004` candidate profile/story retrieval endpoints.
+- Task IDs: M2-004
+- Changes made:
+  - Added retrieval routes in `apps/api-gateway/api_gateway/app.py`:
+    `GET /v1/candidates/{candidate_id}/profile` and `GET /v1/candidates/{candidate_id}/storybank`.
+  - Added storybank query parsing/validation (`min_quality`, `competency`, `limit`, `cursor`) with structured `400 invalid_request` errors for invalid query params.
+  - Added repository pagination/filter support in `apps/api-gateway/api_gateway/repository.py` via `list_candidate_storybank(...)`.
+  - Implemented profile retrieval payload composition with embedded storybank entries and not-found semantics.
+  - Expanded unit tests in `tests/unit/test_job_spec_persistence.py`:
+    profile retrieval shape, storybank pagination/filter behavior, invalid query handling, and unknown-candidate `404` behavior.
+  - Expanded contract tests in `tests/contracts/test_job_ingestions_api_contract.py`:
+    end-to-end profile retrieval and storybank query contract coverage.
+  - Updated candidate-profile README wording/status to reflect active retrieval support responsibilities.
+  - Updated planning docs: marked `M2-004` done and advanced `NEXT_ACTION` to `M2-005`.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_candidate_storybank_generator.py tests/unit/test_candidate_profile_parser.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+- Blockers / risks:
+  - Validation commands requiring temporary DB writes / local API launch still depend on escalated execution in this environment.
+- Next pointer:
+  - Execute `M2-005` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T20:10:30Z
+- Execute `M2-005` candidate parse benchmark + threshold gates.
+- Task IDs: M2-005
+- Changes made:
+  - Started implementation for candidate parse benchmark harness, thresholds, and CI gate wiring.
+- Validation evidence:
+  - Planned: `make test`, `make validate-openapi`, `make migrate-up`, `make migrate-down`, `make contract-test`.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete `M2-005` implementation and validate all gates.
+
+- END
+- 2026-02-28T20:19:06Z
+- Execute `M2-005` candidate parse benchmark + threshold gates.
+- Task IDs: M2-005
+- Changes made:
+  - Added deterministic candidate parse benchmark runner at `services/quality-eval/benchmark/candidate_parse_benchmark.py`.
+  - Implemented aggregate threshold metrics for candidate-profile valid rate, required-field extraction coverage, and story quality-score distribution (`p10`, `p50`, `p90`, `mean`).
+  - Added benchmark report output artifact `.tmp/candidate-parse-benchmark-report.json`.
+  - Added regression tests in `tests/unit/test_candidate_parse_benchmark_runner.py` for threshold pass/fail behavior and report schema fields.
+  - Wired candidate parse benchmark into `make test` and added explicit `benchmark-candidate-parse` target in `Makefile`.
+  - Updated CI workflow to emit candidate benchmark report artifact output.
+  - Updated quality-eval README status and planning docs (`tasklist`, `NEXT_ACTION`) to mark `M2-005` done and move pointer to M3 planning.
+- Validation evidence:
+  - `make test`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make contract-test`
+- Blockers / risks:
+  - No blocking issues encountered.
+- Next pointer:
+  - Execute `M3-PLAN-001` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T20:20:05Z
+- Execute `M3-PLAN-001` backlog planning and pointer handoff for M3.
+- Task IDs: M3-PLAN-001
+- Changes made:
+  - Started M3 planning pass to define executable task graph and advance active pointer.
+- Validation evidence:
+  - Planned: `make test`, `make validate-openapi`, `make migrate-up`, `make migrate-down`, `make contract-test`.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete M3 planning docs and set first executable M3 task.
+
+- END
+- 2026-02-28T20:24:56Z
+- Execute `M3-PLAN-001` backlog planning and pointer handoff for M3.
+- Task IDs: M3-PLAN-001
+- Changes made:
+  - Added concrete M3 backlog tasks (`M3-001` to `M3-007`) with explicit priorities, dependencies, and acceptance criteria in `docs/tasklist.md`.
+  - Marked `M3-PLAN-001` as `DONE` and updated `NEXT` queue to prioritize `M3-001` then `M3-002`.
+  - Updated `docs/implementation-plan.md` with explicit M3 deliverables, acceptance criteria, sprint mapping, service boundary scope, and interview simulation test strategy.
+  - Updated `docs/masterplan.md` with canonical contract locations, explicit M3 core component scope, and tighter M3 milestone exit gate.
+  - Advanced `docs/NEXT_ACTION.md` to `M3-001` with concrete implementation steps for interview session contracts/storage.
+- Validation evidence:
+  - `make test`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make contract-test`
+- Blockers / risks:
+  - No blockers encountered during planning/update pass.
+- Next pointer:
+  - Execute `M3-001` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T20:31:00Z
+- Execute `M3-001` interview session contract/storage foundation.
+- Task IDs: M3-001
+- Changes made:
+  - Started implementation of interview session lifecycle API, storage migration, and contract coverage.
+- Validation evidence:
+  - Planned: `make test`, `make validate-openapi`, `make migrate-up`, `make migrate-down`, `make contract-test`.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete M3-001 implementation and advance roadmap pointer.
+
+- END
+- 2026-02-28T20:42:51Z
+- Execute `M3-001` interview session contract/storage foundation.
+- Task IDs: M3-001
+- Changes made:
+  - Added migration `infra/migrations/005_m3_interview_sessions.sql` for `interview_sessions` and `interview_session_responses` tables with response idempotency uniqueness (`session_id`, `idempotency_key`).
+  - Extended repository with interview session persistence/retrieval and idempotent response application:
+    `create_interview_session(...)`, `get_interview_session_by_id(...)`, `apply_interview_response(...)`.
+  - Added API endpoints in `apps/api-gateway/api_gateway/app.py`:
+    `POST /v1/interview-sessions`, `GET /v1/interview-sessions/{session_id}`, and `POST /v1/interview-sessions/{session_id}/responses`.
+  - Added deterministic session scaffolding and response scoring helpers to produce schema-valid `InterviewSession` payloads.
+  - Enforced response idempotency via `Idempotency-Key` on response append endpoint with conflict handling.
+  - Extended OpenAPI artifact with interview session paths/parameters/schemas.
+  - Added unit coverage in `tests/unit/test_job_spec_persistence.py` for create/get session flow, response append idempotency behavior, and request validation failures.
+  - Added contract coverage in `tests/contracts/test_job_ingestions_api_contract.py` for create/get interview session and response append idempotency behavior.
+  - Updated planning docs to mark `M3-001` done and move active pointer to `M3-002`.
+- Validation evidence:
+  - `python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `make test`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make contract-test`
+- Blockers / risks:
+  - No blockers encountered.
+- Next pointer:
+  - Execute `M3-002` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T20:43:12Z
+- Execute `M3-002` deterministic interview opening-question planner.
+- Task IDs: M3-002
+- Changes made:
+  - Started implementation for deterministic opening-question planning and metadata emission.
+- Validation evidence:
+  - Planned: unit tests, schema validation contracts, API contract tests, and OpenAPI validation.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete M3-002 implementation and advance roadmap pointer.
+
+- END
+- 2026-02-28T20:52:23Z
+- Execute `M3-002` deterministic interview opening-question planner.
+- Task IDs: M3-002
+- Changes made:
+  - Added dedicated planner module `services/interview-engine/planner.py` and service README.
+  - Wired `apps/api-gateway/api_gateway/app.py` to use the planner for opening-question generation.
+  - Planner now derives ordered competencies from `JobSpec.competency_weights` and `CandidateProfile.skills`, balancing weighted priority with evidence-coverage gaps.
+  - Added per-question `planner_metadata` (`source_competency`, `ranking_position`, `deterministic_confidence`) on generated opening questions.
+  - Updated schemas in `schemas/jsonschema/core-schemas.json` and `schemas/openapi/openapi-m0-m2.yaml` to document planner metadata.
+  - Updated valid InterviewSession fixture to include planner metadata.
+  - Added new planner unit tests in `tests/unit/test_interview_question_planner.py`.
+  - Extended unit and contract session tests to assert planner metadata presence and deterministic question ordering stability.
+  - Updated planning docs: marked `M3-002` done and advanced NEXT pointer to `M3-003`.
+- Validation evidence:
+  - `python3 -m unittest -v tests/unit/test_interview_question_planner.py`
+  - `python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `python3 -m unittest -v tests/contracts/test_schema_validation.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+- Blockers / risks:
+  - No blockers encountered.
+- Next pointer:
+  - Execute `M3-003` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T20:52:40Z
+- Execute `M3-003` adaptive follow-up selector and rationale metadata.
+- Task IDs: M3-003
+- Changes made:
+  - Started implementation of adaptive follow-up selection using prior-turn score and competency-gap prioritization.
+- Validation evidence:
+  - Planned: selector unit tests, interview session unit tests, schema/OpenAPI checks, and full contract suite.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete M3-003 implementation and advance pointer.
+
+- END
+- 2026-02-28T20:58:13Z
+- Execute `M3-003` adaptive follow-up selector and rationale metadata.
+- Task IDs: M3-003
+- Changes made:
+  - Added adaptive selector module `services/interview-engine/followup.py`.
+  - Wired selector into interview response application in `apps/api-gateway/api_gateway/app.py`.
+  - Updated response application to:
+    - trigger adaptive follow-ups after all current questions are answered,
+    - avoid immediate competency repetition for strong prior responses,
+    - allow same-competency remediation for low prior scores,
+    - enforce bounded difficulty progression,
+    - attach deterministic follow-up rationale metadata (`selection_reason`, `trigger_question_id`, `trigger_score`),
+    - link follow-up lineage via `follow_up_ids`.
+  - Updated schema/OpenAPI docs for optional follow-up rationale fields within `planner_metadata`.
+  - Added unit tests:
+    - `tests/unit/test_interview_followup_selector.py` (determinism, gap selection, low-score remediation),
+    - extended `tests/unit/test_job_spec_persistence.py` with adaptive follow-up API behavior tests.
+  - Added contract test:
+    - `tests/contracts/test_job_ingestions_api_contract.py::test_adaptive_followup_selection_contract`.
+  - Updated planning docs to mark `M3-003` done and move active pointer to `M3-004`.
+- Validation evidence:
+  - `python3 -m unittest -v tests/unit/test_interview_followup_selector.py`
+  - `python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `python3 -m unittest -v tests/contracts/test_schema_validation.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+- Blockers / risks:
+  - No blockers encountered.
+- Next pointer:
+  - Execute `M3-004` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T20:58:20Z
+- Execute `M3-004` interview turn persistence/snapshot completion validation.
+- Task IDs: M3-004
+- Changes made:
+  - Started multi-turn persistence hardening and completion-snapshot validation work.
+- Validation evidence:
+  - Planned: unit and contract tests covering full session completion and persisted snapshots.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete M3-004 validation and advance pointer.
+
+- END
+- 2026-02-28T20:59:55Z
+- Execute `M3-004` interview turn persistence/snapshot completion validation.
+- Task IDs: M3-004
+- Changes made:
+  - Extended unit coverage in `tests/unit/test_job_spec_persistence.py` with:
+    - `test_interview_session_multi_turn_snapshots_persist_until_completion` validating create/respond/get lifecycle, version increments, completion status, persisted `questions/scores/overall_score`, and response-row durability.
+  - Extended contract coverage in `tests/contracts/test_job_ingestions_api_contract.py` with:
+    - `test_interview_session_completion_snapshots_contract` validating full completion flow, persisted snapshot parity on GET, and response-row persistence.
+  - Kept adaptive follow-up selector behavior active during completion-flow verification.
+  - Updated planning docs to mark `M3-004` done and advance active pointer to `M3-005`.
+- Validation evidence:
+  - `python3 -m unittest -v tests/unit/test_interview_followup_selector.py tests/unit/test_job_spec_persistence.py`
+  - `python3 -m unittest -v tests/contracts/test_schema_validation.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+- Blockers / risks:
+  - No blockers encountered.
+- Next pointer:
+  - Execute `M3-005` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T21:00:05Z
+- Execute `M3-005` orchestration response-ingestion contract hardening.
+- Task IDs: M3-005
+- Changes made:
+  - Started coverage expansion for interview orchestration handler semantics.
+- Validation evidence:
+  - Planned: contract tests for happy path/conflict/validation/not-found plus regression validation suites.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete M3-005 validation and advance pointer.
+
+- END
+- 2026-02-28T21:01:26Z
+- Execute `M3-005` orchestration response-ingestion contract hardening.
+- Task IDs: M3-005
+- Changes made:
+  - Added contract coverage `test_interview_orchestration_validation_and_not_found_contract` in `tests/contracts/test_job_ingestions_api_contract.py`.
+  - Validated orchestration behavior for:
+    - idempotent replay + idempotency conflict,
+    - validation errors (missing `Idempotency-Key`, empty response, unknown `question_id`),
+    - not-found behavior for missing session on `GET` and response append paths.
+  - Re-validated adaptive follow-up and completion-flow orchestration contracts as part of suite execution.
+  - Updated planning docs to mark `M3-005` done and advance pointer to `M3-006`.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `python3 -m unittest -v tests/unit/test_interview_followup_selector.py tests/unit/test_job_spec_persistence.py`
+  - `python3 -m unittest -v tests/contracts/test_schema_validation.py`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+- Blockers / risks:
+  - No blockers encountered.
+- Next pointer:
+  - Execute `M3-006` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T21:02:10Z
+- Execute `M3-006` interview relevance benchmark and CI/local threshold gates.
+- Task IDs: M3-006
+- Changes made:
+  - Started implementation of deterministic interview relevance benchmarking and quality-gate wiring.
+- Validation evidence:
+  - Planned: benchmark unit tests, report emission, `make test`, and full validation gate (`validate-openapi`, migration checks, contract tests).
+- Blockers / risks:
+  - Initial direct benchmark run hit sandbox write restriction for report artifact output.
+- Next pointer:
+  - Complete M3-006 implementation with report-emission validation and update planning docs.
+
+- END
+- 2026-02-28T21:07:38Z
+- Execute `M3-006` interview relevance benchmark and CI/local threshold gates.
+- Task IDs: M3-006
+- Changes made:
+  - Added deterministic benchmark runner `services/quality-eval/benchmark/interview_relevance_benchmark.py` with thresholds for:
+    - opening competency coverage and ordering,
+    - follow-up competency/reason alignment,
+    - non-repetition behavior,
+    - difficulty-bound progression,
+    - aggregate overall relevance.
+  - Added benchmark fixture corpus under `tests/unit/fixtures/interview_relevance/`:
+    - `benchmark_gap_followup.json`
+    - `benchmark_low_score_remediation.json`
+    - `benchmark_single_competency_stabilize.json`
+  - Added unit coverage `tests/unit/test_interview_relevance_benchmark_runner.py` for default-pass, strict-fail thresholds, and report-shape assertions.
+  - Updated `Makefile`:
+    - new target `benchmark-interview-relevance`,
+    - integrated interview relevance gate into `make test`,
+    - added benchmark runner/fixture/report variables for interview relevance.
+  - Updated CI workflow `.github/workflows/ci-placeholder.yml` to emit `.tmp/interview-relevance-benchmark-report.json`.
+  - Updated benchmark package and quality-eval docs to include interview relevance gate.
+  - Re-ran full local quality gates and contract checks with new benchmark integrated.
+- Validation evidence:
+  - `python3 -m unittest -v tests/unit/test_interview_relevance_benchmark_runner.py`
+  - `python3 -m unittest -v tests/unit/test_extraction_benchmark_runner.py tests/unit/test_candidate_parse_benchmark_runner.py`
+  - `python3 services/quality-eval/benchmark/interview_relevance_benchmark.py --fixtures-dir tests/unit/fixtures/interview_relevance --report-path .tmp/interview-relevance-benchmark-report.json`
+  - `make test`
+  - `make validate-openapi && make migrate-up && make migrate-down && make contract-test`
+- Blockers / risks:
+  - Benchmark report write required escalated execution once due sandbox artifact-write restrictions.
+- Next pointer:
+  - Execute `M3-007` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T21:08:05Z
+- Execute `M3-007` reviewer override path with optimistic version checks.
+- Task IDs: M3-007
+- Changes made:
+  - Started reviewer override implementation for low-confidence adaptive follow-up decisions.
+- Validation evidence:
+  - Planned: unit + contract coverage for override happy path, invalid request, and version conflict; full quality gates.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete M3-007 and move active pointer to M4 planning.
+
+- END
+- 2026-02-28T21:11:00Z
+- Execute `M3-007` reviewer override path with optimistic version checks.
+- Task IDs: M3-007
+- Changes made:
+  - Extended append-response request handling in `apps/api-gateway/api_gateway/app.py`:
+    - optional `expected_version` precondition with explicit `version_conflict` response when stale,
+    - optional `override_followup` payload (`reviewer_id`, `reason`, `competency`, optional `difficulty`),
+    - reviewer override application when adaptive follow-up confidence is below threshold,
+    - override metadata persisted in follow-up question planner metadata (`reviewer_override` reason, reviewer id/reason, trigger confidence, override flag).
+  - Kept override path auditable via persisted response `request_json` in `interview_session_responses`.
+  - Updated contracts/docs:
+    - OpenAPI append-response schema now documents `expected_version` and `override_followup`.
+    - InterviewSession planner metadata now documents override fields.
+  - Added/extended tests:
+    - Unit: reviewer override happy path with audit-row assertions, expected-version conflict, invalid override request validation.
+    - Contract: reviewer override flow, expected-version conflict, invalid override payload handling.
+  - Re-ran full local validation gates and confirmed all passing.
+  - Updated planning docs: marked `M3-007` done and advanced active pointer to `M4-PLAN-001`.
+- Validation evidence:
+  - `python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `make test`
+  - `make validate-openapi && make migrate-up && make migrate-down && make contract-test`
+- Blockers / risks:
+  - No blockers encountered.
+- Next pointer:
+  - Execute `M4-PLAN-001` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T21:11:20Z
+- Execute `M4-PLAN-001` and advance to first executable M4 implementation task.
+- Task IDs: M4-PLAN-001
+- Changes made:
+  - Started M4 planning pass to convert milestone scope into executable task graph.
+- Validation evidence:
+  - Planned: task graph + NEXT pointer updates across planning docs.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete M4 planning task graph and move pointer to `M4-001`.
+
+- END
+- 2026-02-28T21:12:17Z
+- Execute `M4-PLAN-001` and advance to first executable M4 implementation task.
+- Task IDs: M4-PLAN-001
+- Changes made:
+  - Added executable M4 task graph (`M4-001` to `M4-006`) with dependencies and acceptance criteria to `docs/tasklist.md`.
+  - Marked `M4-PLAN-001` as `DONE`.
+  - Updated `NEXT` queue to prioritize `M4-001` then `M4-002`.
+  - Updated `docs/NEXT_ACTION.md` to point to `M4-001` feedback-report endpoint foundation with concrete implementation steps.
+- Validation evidence:
+  - Planning artifacts updated and internally consistent (`docs/tasklist.md`, `docs/NEXT_ACTION.md`, `docs/work-log.md`).
+- Blockers / risks:
+  - No blockers encountered.
+- Next pointer:
+  - Execute `M4-001` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T21:24:56Z
+- Execute `M4-001` feedback report endpoint foundation and advance active pointer.
+- Task IDs: M4-001
+- Changes made:
+  - Verified existing `POST /v1/feedback-reports` and `GET /v1/feedback-reports/{feedback_report_id}` contract surface in `schemas/openapi/openapi.yaml`.
+  - Verified API gateway handler/repository behavior for request validation, session existence checks, idempotent replay, idempotency conflict, and persistence retrieval semantics.
+  - Verified contract coverage for feedback-report create/get, validation failures, idempotency conflict, and not-found paths.
+  - Updated planning docs to mark `M4-001` as `DONE` and advance pointers to `M4-002`.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/contracts/test_schema_validation.py`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_taxonomy_normalizer.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+- Blockers / risks:
+  - Contract suite required escalated execution in this environment due sandbox temporary-directory restrictions.
+- Next pointer:
+  - Complete documentation pointer updates and record session end.
+
+- END
+- 2026-02-28T21:25:38Z
+- Execute `M4-001` feedback report endpoint foundation and advance active pointer.
+- Task IDs: M4-001
+- Changes made:
+  - Marked `M4-001` as `DONE` in `docs/tasklist.md`.
+  - Updated `docs/tasklist.md` NEXT queue to `M4-002` then `M4-003`.
+  - Updated `docs/NEXT_ACTION.md` active task from `M4-001` to `M4-002` with deterministic scoring aggregation execution steps.
+- Validation evidence:
+  - All feedback-report contract tests passed within `tests/contracts/test_job_ingestions_api_contract.py`:
+    - `test_create_and_get_feedback_report_contract`
+    - `test_feedback_report_idempotency_conflict_contract`
+    - `test_feedback_report_validation_and_not_found_contract`
+  - Schema validation contract suite passed.
+- Blockers / risks:
+  - No remaining blockers for `M4-001`.
+- Next pointer:
+  - Execute `M4-002` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T21:29:51Z
+- Execute `M4-002` deterministic feedback scoring aggregation and regression coverage.
+- Task IDs: M4-002
+- Changes made:
+  - Implemented deterministic feedback score aggregation from interview question score history in `apps/api-gateway/api_gateway/app.py`.
+  - Updated feedback report generation to include aggregated `overall_score` and to use aggregated scores for trajectory guidance.
+  - Added trend-sensitive competency aggregation (stable ordering, bounded adjustment) and fallback behavior when session score map is missing.
+  - Extended unit and contract coverage for deterministic feedback scoring and persistence shape.
+  - Updated OpenAPI and JSON schema contracts to include `FeedbackReport.overall_score`.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/contracts/test_schema_validation.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+- Blockers / risks:
+  - Contract and unit suites required escalated execution in this environment due sandbox temporary-directory restrictions.
+- Next pointer:
+  - Update planning pointers and close `M4-002`.
+
+- END
+- 2026-02-28T21:30:08Z
+- Execute `M4-002` deterministic feedback scoring aggregation and regression coverage.
+- Task IDs: M4-002
+- Changes made:
+  - Marked `M4-002` as `DONE` in `docs/tasklist.md`.
+  - Updated `docs/tasklist.md` NEXT queue to prioritize `M4-003` then `M4-004`.
+  - Updated `docs/NEXT_ACTION.md` active task to `M4-003` with deterministic root-cause analysis execution steps.
+- Validation evidence:
+  - Unit and contract suites covering feedback report generation and retrieval passed.
+  - OpenAPI structural validation passed for `schemas/openapi/openapi.yaml`.
+- Blockers / risks:
+  - No remaining blockers for `M4-002`.
+- Next pointer:
+  - Execute `M4-003` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T21:34:02Z
+- Execute `M4-003` deterministic root-cause gap analysis from score and response-quality signals.
+- Task IDs: M4-003
+- Changes made:
+  - Upgraded feedback gap analysis in `apps/api-gateway/api_gateway/app.py` to derive deterministic root causes from competency-level quality signals:
+    - response brevity (`avg_words`),
+    - quantified evidence ratio (`metric_ratio`),
+    - action/ownership signal ratio (`action_ratio`),
+    - low-score concentration (`low_score_ratio`),
+    - turn trend (`trend_delta`).
+  - Added risk-adjusted severity scoring and stable gap ranking by risk score then competency ordering.
+  - Improved evidence selection to pick the lowest-scoring answered turn per competency with explicit score tagging.
+  - Added helper signal extractors and deterministic signal detection for metrics/action verbs.
+  - Extended tests:
+    - unit coverage for root-cause signal usage and stable ordering in feedback reports,
+    - contract coverage for top-gap payload semantics and create/get consistency.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/contracts/test_schema_validation.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+- Blockers / risks:
+  - Unit/contract suites required escalated execution in this environment due sandbox temporary-directory restrictions.
+- Next pointer:
+  - Close `M4-003` in planning docs and advance pointer to `M4-004`.
+
+- END
+- 2026-02-28T21:34:21Z
+- Execute `M4-003` deterministic root-cause gap analysis from score and response-quality signals.
+- Task IDs: M4-003
+- Changes made:
+  - Marked `M4-003` as `DONE` in `docs/tasklist.md`.
+  - Updated `docs/tasklist.md` NEXT queue to prioritize `M4-004` then `M4-005`.
+  - Updated `docs/NEXT_ACTION.md` active task to `M4-004` with rewrite/action-plan execution steps.
+- Validation evidence:
+  - Feedback unit and contract suites passed with updated root-cause logic.
+  - OpenAPI structural validation remains green.
+- Blockers / risks:
+  - No remaining blockers for `M4-003`.
+- Next pointer:
+  - Execute `M4-004` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T21:36:00Z
+- Execute `M4-004` deterministic rewrite suggestions and 30-day action-plan generation.
+- Task IDs: M4-004
+- Changes made:
+  - Extended feedback report generation in `apps/api-gateway/api_gateway/app.py` to emit deterministic `answer_rewrites`.
+  - Added low-score response candidate selection and rewrite template synthesis based on top-gap focus areas.
+  - Replaced short action-plan generator with deterministic 30-day schedule output (`day` 1..30) with phased tasks and measurable success criteria.
+  - Kept schema compatibility with existing `FeedbackReport` contract (`answer_rewrites` and `action_plan` shape unchanged).
+  - Expanded tests:
+    - unit assertions for rewrite/action-plan determinism and 30-day day-sequence integrity,
+    - contract assertions for create/get + persisted payload shape consistency.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/contracts/test_schema_validation.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+- Blockers / risks:
+  - Unit/contract suites required escalated execution in this environment due sandbox temporary-directory restrictions.
+- Next pointer:
+  - Close `M4-004` in planning docs and advance pointer to `M4-005`.
+
+- END
+- 2026-02-28T21:36:16Z
+- Execute `M4-004` deterministic rewrite suggestions and 30-day action-plan generation.
+- Task IDs: M4-004
+- Changes made:
+  - Marked `M4-004` as `DONE` in `docs/tasklist.md`.
+  - Updated `docs/tasklist.md` NEXT queue to prioritize `M4-005` then `M4-006`.
+  - Updated `docs/NEXT_ACTION.md` active task to `M4-005` with persistence/versioning hardening steps.
+- Validation evidence:
+  - Updated unit and contract suites passed with rewrite/action-plan assertions.
+  - OpenAPI structural checks remain green.
+- Blockers / risks:
+  - No remaining blockers for `M4-004`.
+- Next pointer:
+  - Execute `M4-005` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T21:46:13Z
+- Execute `M4-005` feedback report persistence/versioning hardening.
+- Task IDs: M4-005
+- Changes made:
+  - Added migration `infra/migrations/007_m4_feedback_report_versioning.sql` to introduce:
+    - `feedback_reports.version` (default 1),
+    - `feedback_reports.supersedes_feedback_report_id`,
+    - per-session unique version index and latest-session lookup index.
+  - Updated repository persistence flow in `apps/api-gateway/api_gateway/repository.py`:
+    - preserves idempotent replay/conflict behavior by `Idempotency-Key`,
+    - enforces optional `expected_version` optimistic precondition for new generations,
+    - persists incrementing feedback versions with supersede linkage.
+  - Updated API handler/validation in `apps/api-gateway/api_gateway/app.py`:
+    - supports `expected_version` / `regenerate` request fields,
+    - returns deterministic `version_conflict` envelope when expected version mismatches current.
+  - Updated OpenAPI + core schema artifacts to document optional versioning fields:
+    - request: `expected_version`, `regenerate`,
+    - response payload: `version`, `supersedes_feedback_report_id`.
+  - Added unit and contract tests for feedback-report version progression and expected-version conflict semantics.
+  - Verified migration up/down lifecycle with the new migration in place.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/contracts/test_schema_validation.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+  - `make migrate-up && make migrate-down`
+- Blockers / risks:
+  - Unit/contract suites required escalated execution in this environment due sandbox temporary-directory restrictions.
+- Next pointer:
+  - Close `M4-005` in planning docs and advance pointer to `M4-006`.
+
+- END
+- 2026-02-28T21:46:32Z
+- Execute `M4-005` feedback report persistence/versioning hardening.
+- Task IDs: M4-005
+- Changes made:
+  - Marked `M4-005` as `DONE` in `docs/tasklist.md`.
+  - Updated `docs/tasklist.md` NEXT queue to prioritize `M4-006`.
+  - Updated `docs/NEXT_ACTION.md` active task to `M4-006` with benchmark/threshold execution steps.
+- Validation evidence:
+  - Feedback versioning unit + contract suites passed.
+  - Migration up/down and OpenAPI structural checks passed.
+- Blockers / risks:
+  - No remaining blockers for `M4-005`.
+- Next pointer:
+  - Execute `M4-006` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T22:25:55Z
+- Execute `M4-006` feedback quality benchmark and threshold-gate integration.
+- Task IDs: M4-006
+- Changes made:
+  - Added deterministic feedback benchmark runner:
+    - `services/quality-eval/benchmark/feedback_quality_benchmark.py`
+    - metrics: completeness, root-cause alignment, evidence traceability, rewrite structure, action-plan coverage, overall feedback quality.
+  - Added benchmark fixture corpus under `tests/unit/fixtures/feedback_quality/` for low-signal, mixed-signal, and no-response fallback cases.
+  - Added benchmark runner unit coverage in `tests/unit/test_feedback_quality_benchmark_runner.py` (default-pass, strict-fail, report-shape assertions).
+  - Integrated benchmark into quality gates:
+    - `Makefile`: new variables/target `benchmark-feedback-quality` and inclusion in `make test`.
+    - CI workflow: emit `.tmp/feedback-quality-benchmark-report.json` artifact.
+  - Updated quality-eval benchmark package/readme descriptions to include feedback-quality gating.
+  - Revalidated full local quality gates and migration/contract checks with the new benchmark included.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_feedback_quality_benchmark_runner.py`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 services/quality-eval/benchmark/feedback_quality_benchmark.py --fixtures-dir tests/unit/fixtures/feedback_quality --report-path .tmp/feedback-quality-benchmark-report.json`
+  - `make test`
+  - `make validate-openapi && make migrate-up && make migrate-down && make contract-test`
+- Blockers / risks:
+  - Benchmark report artifact write required escalated execution in this environment due sandbox restrictions.
+- Next pointer:
+  - Close `M4-006` and transition pointer to `M5-PLAN-001`.
+
+- END
+- 2026-02-28T22:26:16Z
+- Execute `M4-006` feedback quality benchmark and threshold-gate integration.
+- Task IDs: M4-006
+- Changes made:
+  - Marked `M4-006` as `DONE` in `docs/tasklist.md`.
+  - Added `M5-PLAN-001` planning task to `docs/tasklist.md`.
+  - Updated `docs/tasklist.md` NEXT queue and `docs/NEXT_ACTION.md` active pointer to `M5-PLAN-001`.
+- Validation evidence:
+  - Full test, benchmark, migration, OpenAPI, and contract gates passed.
+- Blockers / risks:
+  - No remaining blockers for M4 milestone closeout.
+- Next pointer:
+  - Execute `M5-PLAN-001` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T22:28:54Z
+- Execute `M5-PLAN-001` and advance to first executable M5 implementation task.
+- Task IDs: M5-PLAN-001
+- Changes made:
+  - Started M5 planning pass to convert milestone scope into executable tasks with dependency ordering.
+- Validation evidence:
+  - Planned: planning-doc consistency checks across `docs/tasklist.md`, `docs/NEXT_ACTION.md`, `docs/work-log.md`, and `docs/decision-log.md`.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete M5 task graph and move active pointer to `M5-001`.
+
+- END
+- 2026-02-28T22:30:56Z
+- Execute `M5-PLAN-001` and advance to first executable M5 implementation task.
+- Task IDs: M5-PLAN-001
+- Changes made:
+  - Added executable M5 task graph (`M5-001` to `M5-006`) with dependencies and acceptance criteria to `docs/tasklist.md`.
+  - Marked `M5-PLAN-001` as `DONE`.
+  - Updated `docs/tasklist.md` NEXT queue to prioritize `M5-001` then `M5-002`.
+  - Updated `docs/NEXT_ACTION.md` to point to `M5-001` with concrete execution/validation steps.
+  - Added planning decision `DEC-004` to `docs/decision-log.md` documenting M5 contract-first decomposition.
+- Validation evidence:
+  - Planning artifacts are aligned and pointer-consistent (`docs/tasklist.md`, `docs/NEXT_ACTION.md`, `docs/work-log.md`, `docs/decision-log.md`).
+- Blockers / risks:
+  - No blockers encountered.
+- Next pointer:
+  - Execute `M5-001` from `docs/NEXT_ACTION.md`.

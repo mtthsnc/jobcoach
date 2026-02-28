@@ -1,0 +1,38 @@
+{
+  "case_id": "no_response_fallback",
+  "session": {
+    "session_id": "sess_feedback_no_responses",
+    "job_spec_id": "job_feedback_003",
+    "candidate_id": "cand_feedback_003",
+    "overall_score": 0,
+    "questions": [
+      {
+        "question_id": "q_exec_1",
+        "competency": "skill.execution",
+        "response": "",
+        "score": 0
+      },
+      {
+        "question_id": "q_strategy_1",
+        "competency": "skill.strategy",
+        "response": "",
+        "score": 0
+      }
+    ],
+    "scores": {
+      "skill.execution": 0,
+      "skill.strategy": 0
+    },
+    "root_cause_tags": [
+      "skill.execution",
+      "skill.strategy"
+    ]
+  },
+  "expectations": {
+    "min_top_gaps": 1,
+    "expected_first_severity": "critical",
+    "expected_root_cause_contains": [
+      "missing"
+    ]
+  }
+}

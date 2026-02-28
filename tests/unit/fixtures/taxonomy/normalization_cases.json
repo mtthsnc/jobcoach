@@ -1,0 +1,22 @@
+[
+  {
+    "input": "Python 3",
+    "expected_id": "skill.python",
+    "known": true
+  },
+  {
+    "input": "sqlite",
+    "expected_id": "skill.sql",
+    "known": true
+  },
+  {
+    "input": "event-driven systems",
+    "expected_id": "skill.event_driven_architecture",
+    "known": true
+  },
+  {
+    "input": "stakeholder communication",
+    "expected_id": "unknown",
+    "known": false
+  }
+]

@@ -1,0 +1,10 @@
+{
+  "case_id": "document_ref_source",
+  "source_type": "document_ref",
+  "source_value": "doc://job-postings/marketing-manager-001",
+  "fetched_content": "Marketing Manager\nSummary:\nLead lifecycle campaigns and channel strategy.\nResponsibilities:\n- Own campaign calendar and KPI tracking.\nRequirements:\n- Performance marketing and analytics experience.",
+  "expected_role_title": "Marketing Manager",
+  "expected_sections": ["overview", "responsibilities", "requirements"],
+  "min_sections": 3,
+  "expected_normalized_skill_ids": []
+}

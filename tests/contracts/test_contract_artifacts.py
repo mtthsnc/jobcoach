@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import re
 import unittest
-from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[2]
-OPENAPI_PATH = ROOT / "docs" / "artifacts" / "openapi-m0-m2.yaml"
-SCHEMAS_PATH = ROOT / "docs" / "artifacts" / "core-schemas.json"
+from packages.contracts.artifacts import CORE_SCHEMAS_PATH, OPENAPI_ARTIFACT_PATH
+
+OPENAPI_PATH = OPENAPI_ARTIFACT_PATH
+SCHEMAS_PATH = CORE_SCHEMAS_PATH
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 
 

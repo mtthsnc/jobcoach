@@ -1,0 +1,43 @@
+{
+  "case_id": "mixed_signal_communication",
+  "session": {
+    "session_id": "sess_feedback_mixed_signal",
+    "job_spec_id": "job_feedback_002",
+    "candidate_id": "cand_feedback_002",
+    "overall_score": 76,
+    "questions": [
+      {
+        "question_id": "q_exec_1",
+        "competency": "skill.execution",
+        "response": "I led a migration that reduced incidents by 33% and improved uptime from 99.1% to 99.9%.",
+        "score": 84
+      },
+      {
+        "question_id": "q_comm_1",
+        "competency": "skill.communication",
+        "response": "I explained the plan and sent updates to stakeholders.",
+        "score": 68
+      },
+      {
+        "question_id": "q_comm_2",
+        "competency": "skill.communication",
+        "response": "I coordinated the handoff and made sure the team was aligned.",
+        "score": 72
+      }
+    ],
+    "scores": {
+      "skill.execution": 84,
+      "skill.communication": 70
+    },
+    "root_cause_tags": [
+      "skill.communication"
+    ]
+  },
+  "expectations": {
+    "min_top_gaps": 1,
+    "expected_first_severity": "high",
+    "expected_root_cause_contains": [
+      "quantified"
+    ]
+  }
+}

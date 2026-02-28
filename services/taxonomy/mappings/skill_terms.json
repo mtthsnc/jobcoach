@@ -1,0 +1,24 @@
+{
+  "terms": [
+    {
+      "canonical_id": "skill.python",
+      "canonical_label": "Python",
+      "aliases": ["python", "python 3", "python3"]
+    },
+    {
+      "canonical_id": "skill.sql",
+      "canonical_label": "SQL",
+      "aliases": ["sql", "postgresql", "mysql", "sqlite", "sqlite3"]
+    },
+    {
+      "canonical_id": "skill.event_driven_architecture",
+      "canonical_label": "Event-Driven Architecture",
+      "aliases": ["event driven", "event-driven", "event driven systems", "event bus", "pub sub"]
+    },
+    {
+      "canonical_id": "skill.api_design",
+      "canonical_label": "API Design",
+      "aliases": ["api design", "rest api", "http api"]
+    }
+  ]
+}

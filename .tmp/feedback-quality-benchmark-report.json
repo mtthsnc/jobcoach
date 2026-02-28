@@ -1,0 +1,125 @@
+{
+  "generated_at": "2026-02-28T22:25:38Z",
+  "fixtures_dir": "tests/unit/fixtures/feedback_quality",
+  "thresholds": {
+    "completeness_rate": 0.95,
+    "root_cause_alignment_rate": 0.85,
+    "evidence_traceability_rate": 0.95,
+    "rewrite_structure_rate": 0.95,
+    "action_plan_coverage_rate": 1.0,
+    "overall_feedback_quality": 0.9
+  },
+  "aggregate": {
+    "completeness_rate": 1.0,
+    "root_cause_alignment_rate": 1.0,
+    "evidence_traceability_rate": 1.0,
+    "rewrite_structure_rate": 1.0,
+    "action_plan_coverage_rate": 1.0,
+    "overall_feedback_quality": 1.0
+  },
+  "failed_thresholds": [],
+  "passed": true,
+  "cases": [
+    {
+      "case_id": "low_signal_execution",
+      "overall_score": 51.3,
+      "competency_scores": {
+        "skill.communication": 58.0,
+        "skill.execution": 44.6
+      },
+      "top_gaps": [
+        {
+          "gap": "Execution",
+          "severity": "critical",
+          "root_cause": "Responses were brief and lacked quantified outcomes.",
+          "evidence": "q_exec_1 (score=42.0): ok"
+        },
+        {
+          "gap": "Communication",
+          "severity": "critical",
+          "root_cause": "Responses were brief and lacked quantified outcomes.",
+          "evidence": "q_comm_1 (score=58.0): I told the team we had an issue and shared updates."
+        }
+      ],
+      "answer_rewrites": [
+        "Rewrite q_exec_1 for Execution: Situation: summarize context in one sentence. Task: state your ownership and target. Action: describe 2 concrete steps you led. Result: include at least one metric and business impact.",
+        "Rewrite q_exec_2 for Communication: Situation: summarize context in one sentence. Task: state your ownership and target. Action: describe 2 concrete steps you led. Result: include at least one metric and business impact.",
+        "Rewrite q_comm_1 for Execution: Situation: summarize context in one sentence. Task: state your ownership and target. Action: describe 2 concrete steps you led. Result: include at least one metric and business impact."
+      ],
+      "action_plan_count": 30,
+      "completeness_pass": true,
+      "root_cause_alignment_pass": true,
+      "evidence_traceability_pass": true,
+      "rewrite_structure_pass": true,
+      "action_plan_coverage_pass": true,
+      "case_quality_score": 1.0
+    },
+    {
+      "case_id": "mixed_signal_communication",
+      "overall_score": 77.3,
+      "competency_scores": {
+        "skill.communication": 70.6,
+        "skill.execution": 84.0
+      },
+      "top_gaps": [
+        {
+          "gap": "Communication",
+          "severity": "high",
+          "root_cause": "Responses were brief and lacked quantified outcomes.",
+          "evidence": "q_comm_1 (score=68.0): I explained the plan and sent updates to stakeholders."
+        },
+        {
+          "gap": "Execution",
+          "severity": "low",
+          "root_cause": "Maintain this area while improving adjacent competencies.",
+          "evidence": "q_exec_1 (score=84.0): I led a migration that reduced incidents by 33% and improved uptime from 99.1% to 99.9%."
+        }
+      ],
+      "answer_rewrites": [
+        "Rewrite q_comm_1 for Communication: Situation: summarize context in one sentence. Task: state your ownership and target. Action: describe 2 concrete steps you led. Result: include at least one metric and business impact.",
+        "Rewrite q_comm_2 for Execution: Situation: summarize context in one sentence. Task: state your ownership and target. Action: describe 2 concrete steps you led. Result: include at least one metric and business impact.",
+        "Rewrite q_exec_1 for Communication: Situation: summarize context in one sentence. Task: state your ownership and target. Action: describe 2 concrete steps you led. Result: include at least one metric and business impact."
+      ],
+      "action_plan_count": 30,
+      "completeness_pass": true,
+      "root_cause_alignment_pass": true,
+      "evidence_traceability_pass": true,
+      "rewrite_structure_pass": true,
+      "action_plan_coverage_pass": true,
+      "case_quality_score": 1.0
+    },
+    {
+      "case_id": "no_response_fallback",
+      "overall_score": 0.0,
+      "competency_scores": {
+        "skill.execution": 0.0,
+        "skill.strategy": 0.0
+      },
+      "top_gaps": [
+        {
+          "gap": "Execution",
+          "severity": "critical",
+          "root_cause": "Responses were missing for this competency, so signal quality could not be established.",
+          "evidence": "No response evidence captured for this competency yet."
+        },
+        {
+          "gap": "Strategy",
+          "severity": "critical",
+          "root_cause": "Responses were missing for this competency, so signal quality could not be established.",
+          "evidence": "No response evidence captured for this competency yet."
+        }
+      ],
+      "answer_rewrites": [
+        "Rewrite for Execution: Situation: define context. Task: clarify your role. Action: describe concrete decisions and tradeoffs. Result: quantify the outcome.",
+        "Rewrite for Strategy: Situation: define context. Task: clarify your role. Action: describe concrete decisions and tradeoffs. Result: quantify the outcome."
+      ],
+      "action_plan_count": 30,
+      "completeness_pass": true,
+      "root_cause_alignment_pass": true,
+      "evidence_traceability_pass": true,
+      "rewrite_structure_pass": true,
+      "action_plan_coverage_pass": true,
+      "case_quality_score": 1.0
+    }
+  ]
+}

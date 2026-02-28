@@ -1,0 +1,9 @@
+{
+  "case_id": "text_backend_explicit_sections",
+  "source_type": "text",
+  "source_value": "Senior Backend Engineer\nOverview:\nBuild reliable platform APIs for workflow automation.\nResponsibilities:\n- Build Python services and maintain SQLite schemas.\n- Improve event-driven orchestration and observability.\nRequirements:\n- 5+ years backend engineering.\n- Experience with Python and SQL.\nPreferred Qualifications:\n- Experience with event outbox patterns.\nBenefits:\n- Remote-first team.\n- Home office stipend.",
+  "expected_role_title": "Senior Backend Engineer",
+  "expected_sections": ["overview", "responsibilities", "requirements", "preferred_qualifications", "benefits"],
+  "min_sections": 5,
+  "expected_normalized_skill_ids": ["skill.python", "skill.sql"]
+}

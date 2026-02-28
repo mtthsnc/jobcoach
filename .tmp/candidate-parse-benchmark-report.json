@@ -1,0 +1,107 @@
+{
+  "generated_at": "2026-02-28T22:25:38Z",
+  "fixtures_dir": "tests/unit/fixtures/candidate_parsing",
+  "thresholds": {
+    "candidate_profile_valid_rate": 0.95,
+    "required_field_coverage": 0.9,
+    "story_quality_p50": 0.7,
+    "story_quality_p10": 0.65
+  },
+  "aggregate": {
+    "candidate_profile_valid_rate": 1.0,
+    "required_field_coverage": 1.0,
+    "story_quality_p10": 0.71,
+    "story_quality_p50": 0.75
+  },
+  "story_quality_distribution": {
+    "count": 2,
+    "min": 0.7,
+    "p10": 0.71,
+    "p50": 0.75,
+    "p90": 0.79,
+    "max": 0.8,
+    "mean": 0.75
+  },
+  "failed_thresholds": [],
+  "passed": true,
+  "cases": [
+    {
+      "case_id": "cv_text_basic",
+      "candidate_id": "cand_case001",
+      "parse_confidence": 0.97,
+      "candidate_profile_valid": true,
+      "candidate_profile_validation_issues": [],
+      "required_field_checks": [
+        {
+          "field": "candidate_id",
+          "expected": "cand_case001",
+          "actual": "cand_case001",
+          "passed": true
+        },
+        {
+          "field": "summary",
+          "expected": "Maya Rivera",
+          "actual": "Maya Rivera",
+          "passed": true
+        },
+        {
+          "field": "experience",
+          "expected_min_items": 1,
+          "actual_items": 1,
+          "passed": true
+        },
+        {
+          "field": "skills.python",
+          "expected": "present",
+          "actual": "present",
+          "passed": true
+        },
+        {
+          "field": "skills.sql",
+          "expected": "present",
+          "actual": "present",
+          "passed": true
+        }
+      ],
+      "required_field_coverage": 1.0,
+      "story_count": 1,
+      "story_quality_scores": [
+        0.8
+      ],
+      "story_quality_mean": 0.8
+    },
+    {
+      "case_id": "document_ref_fallback",
+      "candidate_id": "cand_case002",
+      "parse_confidence": 0.78,
+      "candidate_profile_valid": true,
+      "candidate_profile_validation_issues": [],
+      "required_field_checks": [
+        {
+          "field": "candidate_id",
+          "expected": "cand_case002",
+          "actual": "cand_case002",
+          "passed": true
+        },
+        {
+          "field": "experience",
+          "expected_min_items": 1,
+          "actual_items": 1,
+          "passed": true
+        },
+        {
+          "field": "skills.communication",
+          "expected": "present",
+          "actual": "present",
+          "passed": true
+        }
+      ],
+      "required_field_coverage": 1.0,
+      "story_count": 1,
+      "story_quality_scores": [
+        0.7
+      ],
+      "story_quality_mean": 0.7
+    }
+  ]
+}

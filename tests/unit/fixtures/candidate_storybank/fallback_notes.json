@@ -1,0 +1,15 @@
+{
+  "case_id": "fallback_notes",
+  "input": {
+    "candidate_id": "cand_story_002",
+    "experiences": [],
+    "story_notes": [
+      "Coordinated stakeholders and improved delivery cadence."
+    ]
+  },
+  "expectations": {
+    "min_story_count": 1,
+    "required_competencies_any": ["communication", "execution"],
+    "requires_metric": false
+  }
+}

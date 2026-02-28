@@ -1,0 +1,44 @@
+{
+  "case_id": "low_signal_execution",
+  "session": {
+    "session_id": "sess_feedback_low_signal",
+    "job_spec_id": "job_feedback_001",
+    "candidate_id": "cand_feedback_001",
+    "overall_score": 48,
+    "questions": [
+      {
+        "question_id": "q_exec_1",
+        "competency": "skill.execution",
+        "response": "ok",
+        "score": 42
+      },
+      {
+        "question_id": "q_exec_2",
+        "competency": "skill.execution",
+        "response": "Still fixing things",
+        "score": 46
+      },
+      {
+        "question_id": "q_comm_1",
+        "competency": "skill.communication",
+        "response": "I told the team we had an issue and shared updates.",
+        "score": 58
+      }
+    ],
+    "scores": {
+      "skill.execution": 44,
+      "skill.communication": 58
+    },
+    "root_cause_tags": [
+      "skill.execution"
+    ]
+  },
+  "expectations": {
+    "min_top_gaps": 1,
+    "expected_first_severity": "critical",
+    "expected_root_cause_contains": [
+      "brief",
+      "quantified"
+    ]
+  }
+}

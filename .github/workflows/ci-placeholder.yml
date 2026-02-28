@@ -19,6 +19,18 @@ jobs:
       - name: Run lint + unit tests
         run: make lint test
 
+      - name: Show extraction benchmark report
+        run: cat .tmp/extraction-benchmark-report.json
+
+      - name: Show candidate parse benchmark report
+        run: cat .tmp/candidate-parse-benchmark-report.json
+
+      - name: Show interview relevance benchmark report
+        run: cat .tmp/interview-relevance-benchmark-report.json
+
+      - name: Show feedback quality benchmark report
+        run: cat .tmp/feedback-quality-benchmark-report.json
+
       - name: Run deterministic migration targets
         run: make migrate-up migrate-down
 

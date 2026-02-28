@@ -1,0 +1,10 @@
+{
+  "case_id": "url_html_cleanup",
+  "source_type": "url",
+  "source_value": "https://example.com/jobs/staff-data-engineer",
+  "fetched_content": "<html><body><h1>Staff Data Engineer</h1><section><h2>Responsibilities</h2><ul><li>Build ETL pipelines</li><li>Maintain data quality checks</li></ul></section><section><h2>Qualifications</h2><ul><li>Python and SQL proficiency</li><li>Distributed systems experience</li></ul></section></body></html>",
+  "expected_role_title": "Staff Data Engineer",
+  "expected_sections": ["responsibilities", "requirements"],
+  "min_sections": 2,
+  "expected_normalized_skill_ids": ["skill.python", "skill.sql"]
+}

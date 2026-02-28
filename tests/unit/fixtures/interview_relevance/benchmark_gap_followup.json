@@ -1,0 +1,35 @@
+{
+  "case_id": "interview_gap_followup",
+  "session_id": "sess_interview_gap_followup",
+  "job_spec": {
+    "competency_weights": {
+      "skill.python": 0.95,
+      "skill.sql": 0.9,
+      "skill.communication": 0.7
+    }
+  },
+  "candidate_profile": {
+    "skills": {
+      "python": 0.92,
+      "sql": 0.25,
+      "communication": 0.8
+    }
+  },
+  "expected_opening_competencies": [
+    "skill.sql",
+    "skill.python",
+    "skill.communication"
+  ],
+  "followup_context": {
+    "last_question_index": 1,
+    "scores": {
+      "skill.sql": 55.0,
+      "skill.python": 88.0,
+      "skill.communication": 82.0
+    },
+    "last_score": 88.0,
+    "expected_followup_competency": "skill.sql",
+    "expected_reasons": ["coverage_gap"],
+    "expect_non_repeat": true
+  }
+}

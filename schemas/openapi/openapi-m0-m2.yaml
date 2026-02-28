@@ -1,0 +1,883 @@
+openapi: 3.1.0
+info:
+  title: JobCoach API
+  version: 0.1.0
+  description: M0-M4 contracts for job, candidate, interview session, and feedback workflows.
+servers:
+  - url: https://api.jobcoach.local/v1
+security:
+  - bearerAuth: []
+
+paths:
+  /job-ingestions:
+    post:
+      summary: Create a job ingestion run
+      operationId: createJobIngestion
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobIngestionRequest'
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionAcceptedResponse'
+
+  /job-ingestions/{ingestion_id}:
+    get:
+      summary: Get job ingestion status
+      operationId: getJobIngestion
+      parameters:
+        - $ref: '#/components/parameters/IngestionId'
+      responses:
+        '200':
+          description: Ingestion status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionStatusResponse'
+
+  /job-specs/{job_spec_id}:
+    get:
+      summary: Get a normalized job spec
+      operationId: getJobSpec
+      parameters:
+        - $ref: '#/components/parameters/JobSpecId'
+      responses:
+        '200':
+          description: Job spec
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobSpecResponse'
+
+  /job-specs/{job_spec_id}/review:
+    patch:
+      summary: Apply reviewer corrections to a job spec
+      operationId: patchJobSpecReview
+      parameters:
+        - $ref: '#/components/parameters/JobSpecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchJobSpecReviewRequest'
+      responses:
+        '200':
+          description: Updated job spec
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobSpecResponse'
+        '409':
+          description: Version conflict
+
+  /candidate-ingestions:
+    post:
+      summary: Create a candidate ingestion run
+      operationId: createCandidateIngestion
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCandidateIngestionRequest'
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionAcceptedResponse'
+
+  /candidate-ingestions/{ingestion_id}:
+    get:
+      summary: Get candidate ingestion status
+      operationId: getCandidateIngestion
+      parameters:
+        - $ref: '#/components/parameters/IngestionId'
+      responses:
+        '200':
+          description: Ingestion status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionStatusResponse'
+
+  /candidates/{candidate_id}/profile:
+    get:
+      summary: Get candidate profile
+      operationId: getCandidateProfile
+      parameters:
+        - $ref: '#/components/parameters/CandidateId'
+      responses:
+        '200':
+          description: Candidate profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateProfileResponse'
+
+  /candidates/{candidate_id}/storybank:
+    get:
+      summary: Get candidate storybank entries
+      operationId: getCandidateStorybank
+      parameters:
+        - $ref: '#/components/parameters/CandidateId'
+        - in: query
+          name: min_quality
+          schema:
+            type: number
+            minimum: 0
+            maximum: 1
+        - in: query
+          name: competency
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - in: query
+          name: cursor
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Storybank page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorybankResponse'
+
+  /interview-sessions:
+    post:
+      summary: Create an interview session
+      operationId: createInterviewSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInterviewSessionRequest'
+      responses:
+        '201':
+          description: Interview session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewSessionResponse'
+
+  /interview-sessions/{session_id}:
+    get:
+      summary: Get interview session state
+      operationId: getInterviewSession
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Interview session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewSessionResponse'
+
+  /interview-sessions/{session_id}/responses:
+    post:
+      summary: Append a candidate response to an interview session
+      operationId: appendInterviewResponse
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppendInterviewResponseRequest'
+      responses:
+        '200':
+          description: Updated interview session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterviewSessionResponse'
+        '409':
+          description: Idempotency or version conflict
+
+  /feedback-reports:
+    post:
+      summary: Create a feedback report for an interview session
+      operationId: createFeedbackReport
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFeedbackReportRequest'
+      responses:
+        '201':
+          description: Feedback report created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackReportResponse'
+        '409':
+          description: Idempotency conflict
+
+  /feedback-reports/{feedback_report_id}:
+    get:
+      summary: Get feedback report
+      operationId: getFeedbackReport
+      parameters:
+        - $ref: '#/components/parameters/FeedbackReportId'
+      responses:
+        '200':
+          description: Feedback report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackReportResponse'
+
+  /taxonomy/normalize:
+    post:
+      summary: Normalize free-form terms into canonical taxonomy terms
+      operationId: normalizeTaxonomyTerms
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaxonomyNormalizeRequest'
+      responses:
+        '200':
+          description: Normalized terms
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaxonomyNormalizeResponse'
+
+  /evals/run:
+    post:
+      summary: Trigger an evaluation suite
+      operationId: runEvalSuite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunEvalRequest'
+      responses:
+        '202':
+          description: Eval accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalAcceptedResponse'
+
+  /evals/{eval_run_id}:
+    get:
+      summary: Get eval run status and metrics
+      operationId: getEvalRun
+      parameters:
+        - $ref: '#/components/parameters/EvalRunId'
+      responses:
+        '200':
+          description: Eval run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalRunResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      schema:
+        type: string
+    IngestionId:
+      in: path
+      name: ingestion_id
+      required: true
+      schema:
+        type: string
+    JobSpecId:
+      in: path
+      name: job_spec_id
+      required: true
+      schema:
+        type: string
+    CandidateId:
+      in: path
+      name: candidate_id
+      required: true
+      schema:
+        type: string
+    SessionId:
+      in: path
+      name: session_id
+      required: true
+      schema:
+        type: string
+    FeedbackReportId:
+      in: path
+      name: feedback_report_id
+      required: true
+      schema:
+        type: string
+    EvalRunId:
+      in: path
+      name: eval_run_id
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    Meta:
+      type: object
+      required: [request_id, timestamp]
+      properties:
+        request_id: { type: string }
+        timestamp: { type: string, format: date-time }
+
+    Error:
+      type: object
+      required: [code, message, retryable]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        retryable: { type: boolean }
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              reason: { type: string }
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        data: { type: 'null' }
+        meta: { $ref: '#/components/schemas/Meta' }
+        error: { $ref: '#/components/schemas/Error' }
+
+    CreateJobIngestionRequest:
+      type: object
+      required: [source_type, source_value]
+      properties:
+        source_type:
+          type: string
+          enum: [url, text, document_ref]
+        source_value:
+          type: string
+        target_locale:
+          type: string
+          default: en-US
+
+    CreateCandidateIngestionRequest:
+      type: object
+      properties:
+        candidate_id: { type: string }
+        cv_text: { type: string }
+        cv_document_ref: { type: string }
+        story_notes:
+          type: array
+          items: { type: string }
+        target_roles:
+          type: array
+          items: { type: string }
+      oneOf:
+        - required: [cv_text]
+        - required: [cv_document_ref]
+
+    IngestionAcceptedResponse:
+      type: object
+      required: [data, meta, error]
+      properties:
+        data:
+          type: object
+          required: [ingestion_id, status]
+          properties:
+            ingestion_id: { type: string }
+            status: { type: string, enum: [queued] }
+        meta: { $ref: '#/components/schemas/Meta' }
+        error: { type: 'null' }
+
+    IngestionStatusResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          required: [ingestion_id, status, current_stage]
+          properties:
+            ingestion_id: { type: string }
+            status: { type: string, enum: [queued, running, succeeded, failed, canceled] }
+            current_stage: { type: string }
+            progress_pct: { type: integer, minimum: 0, maximum: 100 }
+            result:
+              type: object
+              properties:
+                entity_id: { type: string }
+            error:
+              $ref: '#/components/schemas/Error'
+        meta: { $ref: '#/components/schemas/Meta' }
+        error: { type: 'null' }
+
+    JobSpecResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/JobSpec'
+        meta: { $ref: '#/components/schemas/Meta' }
+        error: { type: 'null' }
+
+    JobSpec:
+      type: object
+      required:
+        [job_spec_id, source, role_title, responsibilities, requirements, competency_weights, extraction_confidence, version]
+      properties:
+        job_spec_id: { type: string }
+        source:
+          type: object
+          required: [type, value, captured_at]
+          properties:
+            type: { type: string, enum: [url, text, document_ref] }
+            value: { type: string }
+            captured_at: { type: string, format: date-time }
+        company: { type: string }
+        role_title: { type: string }
+        seniority_level: { type: string }
+        location: { type: string }
+        employment_type: { type: string }
+        responsibilities:
+          type: array
+          minItems: 1
+          items: { type: string }
+        requirements:
+          type: object
+          required: [required_skills, preferred_skills]
+          properties:
+            required_skills:
+              type: array
+              items: { type: string }
+            preferred_skills:
+              type: array
+              items: { type: string }
+        competency_weights:
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 1
+        evidence_spans:
+          type: array
+          items:
+            type: object
+            required: [field, text, confidence]
+            properties:
+              field: { type: string }
+              text: { type: string }
+              confidence:
+                type: number
+                minimum: 0
+                maximum: 1
+        extraction_confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        taxonomy_version: { type: string }
+        version: { type: integer, minimum: 1 }
+
+    PatchJobSpecReviewRequest:
+      type: object
+      required: [expected_version, patch]
+      properties:
+        expected_version: { type: integer, minimum: 1 }
+        patch:
+          type: object
+          additionalProperties: true
+        review_notes: { type: string }
+
+    CandidateProfileResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/CandidateProfile'
+        meta: { $ref: '#/components/schemas/Meta' }
+        error: { type: 'null' }
+
+    CandidateProfile:
+      type: object
+      required: [candidate_id, summary, experience, skills, parse_confidence, version]
+      properties:
+        candidate_id: { type: string }
+        summary: { type: string }
+        target_roles:
+          type: array
+          items: { type: string }
+        experience:
+          type: array
+          items:
+            type: object
+            required: [company, title, start_date, highlights]
+            properties:
+              company: { type: string }
+              title: { type: string }
+              start_date: { type: string, format: date }
+              end_date: { type: string }
+              highlights:
+                type: array
+                items: { type: string }
+        skills:
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 1
+        parse_confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        version: { type: integer, minimum: 1 }
+        storybank:
+          type: array
+          items:
+            type: object
+            required: [story_id, situation, task, action, result, competencies, evidence_quality]
+            properties:
+              story_id: { type: string }
+              situation: { type: string }
+              task: { type: string }
+              action: { type: string }
+              result: { type: string }
+              metrics:
+                type: array
+                items: { type: string }
+              competencies:
+                type: array
+                items: { type: string }
+              evidence_quality:
+                type: number
+                minimum: 0
+                maximum: 1
+
+    StorybankResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                type: object
+                properties:
+                  story_id: { type: string }
+                  situation: { type: string }
+                  task: { type: string }
+                  action: { type: string }
+                  result: { type: string }
+                  metrics:
+                    type: array
+                    items: { type: string }
+                  competencies:
+                    type: array
+                    items: { type: string }
+                  evidence_quality:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+            next_cursor: { type: string, nullable: true }
+        meta: { $ref: '#/components/schemas/Meta' }
+        error: { type: 'null' }
+
+    CreateInterviewSessionRequest:
+      type: object
+      required: [job_spec_id, candidate_id]
+      properties:
+        job_spec_id: { type: string }
+        candidate_id: { type: string }
+        mode:
+          type: string
+          enum: [mock_interview, drill, negotiation]
+          default: mock_interview
+
+    AppendInterviewResponseRequest:
+      type: object
+      required: [response]
+      properties:
+        question_id: { type: string }
+        response: { type: string }
+        expected_version:
+          type: integer
+          minimum: 1
+        override_followup:
+          type: object
+          required: [reviewer_id, reason, competency]
+          properties:
+            reviewer_id: { type: string }
+            reason: { type: string }
+            competency: { type: string }
+            difficulty:
+              type: integer
+              minimum: 1
+              maximum: 5
+
+    InterviewSessionResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/InterviewSession'
+        meta: { $ref: '#/components/schemas/Meta' }
+        error: { type: 'null' }
+
+    CreateFeedbackReportRequest:
+      type: object
+      required: [session_id]
+      properties:
+        session_id: { type: string }
+        expected_version:
+          type: integer
+          minimum: 0
+        regenerate:
+          type: boolean
+
+    FeedbackReportResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/FeedbackReport'
+        meta: { $ref: '#/components/schemas/Meta' }
+        error: { type: 'null' }
+
+    FeedbackReport:
+      type: object
+      required: [feedback_report_id, session_id, top_gaps, action_plan, overall_score, generated_at]
+      properties:
+        feedback_report_id: { type: string }
+        session_id: { type: string }
+        top_gaps:
+          type: array
+          items:
+            type: object
+            required: [gap, severity, root_cause, evidence]
+            properties:
+              gap: { type: string }
+              severity: { type: string, enum: [low, medium, high, critical] }
+              root_cause: { type: string }
+              evidence: { type: string }
+        competency_scores:
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 100
+        overall_score:
+          type: number
+          minimum: 0
+          maximum: 100
+        version:
+          type: integer
+          minimum: 1
+        supersedes_feedback_report_id:
+          type: string
+        answer_rewrites:
+          type: array
+          items: { type: string }
+        action_plan:
+          type: array
+          items:
+            type: object
+            required: [day, task, success_metric]
+            properties:
+              day: { type: integer, minimum: 1, maximum: 30 }
+              task: { type: string }
+              success_metric: { type: string }
+        trajectory_update: { type: string }
+        generated_at:
+          type: string
+          format: date-time
+
+    InterviewSession:
+      type: object
+      required: [session_id, job_spec_id, candidate_id, questions, scores, overall_score, created_at]
+      properties:
+        session_id: { type: string }
+        job_spec_id: { type: string }
+        candidate_id: { type: string }
+        mode:
+          type: string
+          enum: [mock_interview, drill, negotiation]
+        status:
+          type: string
+          enum: [in_progress, completed]
+        questions:
+          type: array
+          items:
+            type: object
+            required: [question_id, text, competency, difficulty, response, score]
+            properties:
+              question_id: { type: string }
+              text: { type: string }
+              competency: { type: string }
+              difficulty:
+                type: integer
+                minimum: 1
+                maximum: 5
+              response: { type: string }
+              planner_metadata:
+                type: object
+                required: [source_competency, ranking_position, deterministic_confidence]
+                properties:
+                  source_competency: { type: string }
+                  ranking_position:
+                    type: integer
+                    minimum: 1
+                  deterministic_confidence:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+                  selection_reason: { type: string }
+                  trigger_question_id: { type: string }
+                  trigger_score:
+                    type: number
+                    minimum: 0
+                    maximum: 100
+                  override_applied: { type: boolean }
+                  override_reviewer_id: { type: string }
+                  override_reason: { type: string }
+                  override_trigger_confidence:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+              score:
+                type: number
+                minimum: 0
+                maximum: 100
+        scores:
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 100
+        overall_score:
+          type: number
+          minimum: 0
+          maximum: 100
+        root_cause_tags:
+          type: array
+          items: { type: string }
+        created_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          minimum: 1
+
+    TaxonomyNormalizeRequest:
+      type: object
+      required: [terms]
+      properties:
+        terms:
+          type: array
+          minItems: 1
+          items: { type: string }
+
+    TaxonomyNormalizeResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            taxonomy_version: { type: string }
+            mapped:
+              type: array
+              items:
+                type: object
+                properties:
+                  input: { type: string }
+                  canonical: { type: string }
+                  confidence: { type: number, minimum: 0, maximum: 1 }
+            unmapped:
+              type: array
+              items: { type: string }
+        meta: { $ref: '#/components/schemas/Meta' }
+        error: { type: 'null' }
+
+    RunEvalRequest:
+      type: object
+      required: [suite]
+      properties:
+        suite:
+          type: string
+          enum: [job_extraction_v1, candidate_parse_v1]
+
+    EvalAcceptedResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            eval_run_id: { type: string }
+            status: { type: string, enum: [queued] }
+        meta: { $ref: '#/components/schemas/Meta' }
+        error: { type: 'null' }
+
+    EvalRunResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            eval_run_id: { type: string }
+            suite: { type: string }
+            status: { type: string, enum: [queued, running, succeeded, failed] }
+            metrics:
+              type: object
+              additionalProperties: true
+        meta: { $ref: '#/components/schemas/Meta' }
+        error: { type: 'null' }
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'

@@ -1,0 +1,35 @@
+{
+  "case_id": "interview_low_score_remediation",
+  "session_id": "sess_interview_low_score_remediation",
+  "job_spec": {
+    "competency_weights": {
+      "skill.leadership": 0.9,
+      "skill.communication": 0.8,
+      "skill.execution": 0.7
+    }
+  },
+  "candidate_profile": {
+    "skills": {
+      "leadership": 0.35,
+      "communication": 0.72,
+      "execution": 0.64
+    }
+  },
+  "expected_opening_competencies": [
+    "skill.leadership",
+    "skill.communication",
+    "skill.execution"
+  ],
+  "followup_context": {
+    "last_question_index": 0,
+    "scores": {
+      "skill.leadership": 51.0,
+      "skill.communication": 80.0,
+      "skill.execution": 77.0
+    },
+    "last_score": 51.0,
+    "expected_followup_competency": "skill.leadership",
+    "expected_reasons": ["low_score_remediation"],
+    "expect_non_repeat": false
+  }
+}

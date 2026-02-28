@@ -1,0 +1,9 @@
+{
+  "case_id": "text_alt_headings",
+  "source_type": "text",
+  "source_value": "Platform Engineer\nWhat You'll Do:\n- Design data pipelines and ingestion workflows.\n- Ship resilient API integrations.\nWhat We're Looking For:\n- Strong SQL and systems debugging.\n- Comfort with asynchronous workflows.\nNice to Have:\n- Prior ML infrastructure exposure.",
+  "expected_role_title": "Platform Engineer",
+  "expected_sections": ["responsibilities", "requirements", "preferred_qualifications"],
+  "min_sections": 3,
+  "expected_normalized_skill_ids": ["skill.sql"]
+}

@@ -1,22 +1,95 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
+import re
+import sys
 from datetime import datetime, timezone
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote
 from uuid import uuid4
 
-from .repository import JobIngestionRecord, SQLiteJobIngestionRepository
+from .repository import CandidateIngestionRecord, JobIngestionRecord, SQLiteJobIngestionRepository
 
 SOURCE_TYPE_VALUES = {"url", "text", "document_ref"}
+INTERVIEW_MODE_VALUES = {"mock_interview", "drill", "negotiation"}
+ROOT_DIR = Path(__file__).resolve().parents[3]
+JOB_EXTRACTION_PATH = ROOT_DIR / "services" / "job-extraction" / "worker.py"
+TAXONOMY_PATH = ROOT_DIR / "services" / "taxonomy" / "normalizer.py"
+SCHEMA_VALIDATOR_PATH = ROOT_DIR / "services" / "quality-eval" / "schema_validation" / "validator.py"
+CANDIDATE_PROFILE_PARSER_PATH = ROOT_DIR / "services" / "candidate-profile" / "parser.py"
+CANDIDATE_STORYBANK_PATH = ROOT_DIR / "services" / "candidate-profile" / "storybank.py"
+INTERVIEW_PLANNER_PATH = ROOT_DIR / "services" / "interview-engine" / "planner.py"
+INTERVIEW_FOLLOWUP_PATH = ROOT_DIR / "services" / "interview-engine" / "followup.py"
+INTERVIEW_ROUTE_PREFIX = "/v1/interview-sessions/"
+INTERVIEW_RESPONSES_SUFFIX = "/responses"
+FEEDBACK_ROUTE_PREFIX = "/v1/feedback-reports/"
+JOB_SPEC_ROUTE_PREFIX = "/v1/job-specs/"
+JOB_SPEC_REVIEW_ROUTE_SUFFIX = "/review"
+CANDIDATE_ROUTE_PREFIX = "/v1/candidates/"
+CANDIDATE_PROFILE_SUFFIX = "/profile"
+CANDIDATE_STORYBANK_SUFFIX = "/storybank"
+FOLLOWUP_OVERRIDE_CONFIDENCE_THRESHOLD = 0.80
+IMMUTABLE_JOB_SPEC_PATCH_FIELDS = {"job_spec_id", "source", "version"}
+MUTABLE_JOB_SPEC_PATCH_FIELDS = {
+    "company",
+    "role_title",
+    "seniority_level",
+    "location",
+    "employment_type",
+    "responsibilities",
+    "requirements",
+    "competency_weights",
+    "evidence_spans",
+    "extraction_confidence",
+    "taxonomy_version",
+}
+
+
+def _load_module(module_name: str, module_path: Path):
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load module: {module_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_JOB_EXTRACTION_MODULE = _load_module("job_extraction_worker", JOB_EXTRACTION_PATH)
+_TAXONOMY_MODULE = _load_module("taxonomy_normalizer", TAXONOMY_PATH)
+_SCHEMA_VALIDATOR_MODULE = _load_module("core_schema_validator", SCHEMA_VALIDATOR_PATH)
+_CANDIDATE_PROFILE_MODULE = _load_module("candidate_profile_parser", CANDIDATE_PROFILE_PARSER_PATH)
+_CANDIDATE_STORYBANK_MODULE = _load_module("candidate_storybank_generator", CANDIDATE_STORYBANK_PATH)
+_INTERVIEW_PLANNER_MODULE = _load_module("interview_question_planner", INTERVIEW_PLANNER_PATH)
+_INTERVIEW_FOLLOWUP_MODULE = _load_module("interview_followup_selector", INTERVIEW_FOLLOWUP_PATH)
 
 
 class JobIngestionAPI:
-    def __init__(self, repository: SQLiteJobIngestionRepository) -> None:
+    def __init__(
+        self,
+        repository: SQLiteJobIngestionRepository,
+        *,
+        extraction_worker: Any,
+        taxonomy_normalizer: Any,
+        schema_validator: Any,
+        candidate_profile_parser: Any,
+        candidate_storybank_generator: Any,
+        interview_question_planner: Any,
+        interview_followup_selector: Any,
+    ) -> None:
         self._repository = repository
+        self._extraction_worker = extraction_worker
+        self._taxonomy_normalizer = taxonomy_normalizer
+        self._schema_validator = schema_validator
+        self._candidate_profile_parser = candidate_profile_parser
+        self._candidate_storybank_generator = candidate_storybank_generator
+        self._interview_question_planner = interview_question_planner
+        self._interview_followup_selector = interview_followup_selector
 
     def __call__(self, environ: dict[str, Any], start_response: Any) -> list[bytes]:
         method = str(environ.get("REQUEST_METHOD", "")).upper()
@@ -49,6 +122,207 @@ class JobIngestionAPI:
                     headers=[("Allow", "GET")],
                 )
             return self._handle_get(start_response, request_id=request_id, ingestion_id=ingestion_id)
+
+        if path == "/v1/candidate-ingestions":
+            if method != "POST":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "POST")],
+                )
+            return self._handle_create_candidate(environ, start_response, request_id=request_id)
+
+        if path.startswith("/v1/candidate-ingestions/"):
+            ingestion_id = unquote(path[len("/v1/candidate-ingestions/") :])
+            if not ingestion_id or "/" in ingestion_id:
+                return _json_response(
+                    start_response,
+                    HTTPStatus.NOT_FOUND,
+                    _error_envelope(request_id=request_id, code="not_found", message="Resource not found", retryable=False),
+                )
+            if method != "GET":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "GET")],
+                )
+            return self._handle_get_candidate(start_response, request_id=request_id, ingestion_id=ingestion_id)
+
+        if path == "/v1/interview-sessions":
+            if method != "POST":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "POST")],
+                )
+            return self._handle_create_interview_session(environ, start_response, request_id=request_id)
+
+        if path.startswith(INTERVIEW_ROUTE_PREFIX) and path.endswith(INTERVIEW_RESPONSES_SUFFIX):
+            session_id = unquote(path[len(INTERVIEW_ROUTE_PREFIX) : -len(INTERVIEW_RESPONSES_SUFFIX)])
+            if session_id.endswith("/"):
+                session_id = session_id[:-1]
+            if not session_id or "/" in session_id:
+                return _json_response(
+                    start_response,
+                    HTTPStatus.NOT_FOUND,
+                    _error_envelope(request_id=request_id, code="not_found", message="Resource not found", retryable=False),
+                )
+            if method != "POST":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "POST")],
+                )
+            return self._handle_append_interview_response(
+                environ,
+                start_response,
+                request_id=request_id,
+                session_id=session_id,
+            )
+
+        if path.startswith(INTERVIEW_ROUTE_PREFIX):
+            session_id = unquote(path[len(INTERVIEW_ROUTE_PREFIX) :])
+            if not session_id or "/" in session_id:
+                return _json_response(
+                    start_response,
+                    HTTPStatus.NOT_FOUND,
+                    _error_envelope(request_id=request_id, code="not_found", message="Resource not found", retryable=False),
+                )
+            if method != "GET":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "GET")],
+                )
+            return self._handle_get_interview_session(
+                start_response,
+                request_id=request_id,
+                session_id=session_id,
+            )
+
+        if path == "/v1/feedback-reports":
+            if method != "POST":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "POST")],
+                )
+            return self._handle_create_feedback_report(environ, start_response, request_id=request_id)
+
+        if path.startswith(FEEDBACK_ROUTE_PREFIX):
+            feedback_report_id = unquote(path[len(FEEDBACK_ROUTE_PREFIX) :])
+            if not feedback_report_id or "/" in feedback_report_id:
+                return _json_response(
+                    start_response,
+                    HTTPStatus.NOT_FOUND,
+                    _error_envelope(request_id=request_id, code="not_found", message="Resource not found", retryable=False),
+                )
+            if method != "GET":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "GET")],
+                )
+            return self._handle_get_feedback_report(
+                start_response,
+                request_id=request_id,
+                feedback_report_id=feedback_report_id,
+            )
+
+        if path.startswith(CANDIDATE_ROUTE_PREFIX) and path.endswith(CANDIDATE_PROFILE_SUFFIX):
+            candidate_id = unquote(path[len(CANDIDATE_ROUTE_PREFIX) : -len(CANDIDATE_PROFILE_SUFFIX)])
+            if candidate_id.endswith("/"):
+                candidate_id = candidate_id[:-1]
+            if not candidate_id or "/" in candidate_id:
+                return _json_response(
+                    start_response,
+                    HTTPStatus.NOT_FOUND,
+                    _error_envelope(request_id=request_id, code="not_found", message="Resource not found", retryable=False),
+                )
+            if method != "GET":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "GET")],
+                )
+            return self._handle_get_candidate_profile(
+                start_response,
+                request_id=request_id,
+                candidate_id=candidate_id,
+            )
+
+        if path.startswith(CANDIDATE_ROUTE_PREFIX) and path.endswith(CANDIDATE_STORYBANK_SUFFIX):
+            candidate_id = unquote(path[len(CANDIDATE_ROUTE_PREFIX) : -len(CANDIDATE_STORYBANK_SUFFIX)])
+            if candidate_id.endswith("/"):
+                candidate_id = candidate_id[:-1]
+            if not candidate_id or "/" in candidate_id:
+                return _json_response(
+                    start_response,
+                    HTTPStatus.NOT_FOUND,
+                    _error_envelope(request_id=request_id, code="not_found", message="Resource not found", retryable=False),
+                )
+            if method != "GET":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "GET")],
+                )
+            return self._handle_get_candidate_storybank(
+                environ,
+                start_response,
+                request_id=request_id,
+                candidate_id=candidate_id,
+            )
+
+        if path.startswith(JOB_SPEC_ROUTE_PREFIX) and path.endswith(JOB_SPEC_REVIEW_ROUTE_SUFFIX):
+            job_spec_id = unquote(path[len(JOB_SPEC_ROUTE_PREFIX) : -len(JOB_SPEC_REVIEW_ROUTE_SUFFIX)])
+            if job_spec_id.endswith("/"):
+                job_spec_id = job_spec_id[:-1]
+            if not job_spec_id or "/" in job_spec_id:
+                return _json_response(
+                    start_response,
+                    HTTPStatus.NOT_FOUND,
+                    _error_envelope(request_id=request_id, code="not_found", message="Resource not found", retryable=False),
+                )
+            if method != "PATCH":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "PATCH")],
+                )
+            return self._handle_patch_job_spec_review(
+                environ,
+                start_response,
+                request_id=request_id,
+                job_spec_id=job_spec_id,
+            )
+
+        if path.startswith(JOB_SPEC_ROUTE_PREFIX):
+            job_spec_id = unquote(path[len(JOB_SPEC_ROUTE_PREFIX) :])
+            if not job_spec_id or "/" in job_spec_id:
+                return _json_response(
+                    start_response,
+                    HTTPStatus.NOT_FOUND,
+                    _error_envelope(request_id=request_id, code="not_found", message="Resource not found", retryable=False),
+                )
+            if method != "GET":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "GET")],
+                )
+            return self._handle_get_job_spec(start_response, request_id=request_id, job_spec_id=job_spec_id)
 
         return _json_response(
             start_response,
@@ -126,6 +400,28 @@ class JobIngestionAPI:
                 ),
             )
 
+        if source_type == "text" and not existing_record.result_job_spec_id:
+            job_spec_payload = self._build_job_spec_payload(existing_record)
+            validation = self._schema_validator.validate("JobSpec", job_spec_payload)
+            if not validation.is_valid:
+                issue_summary = [{"path": issue.path, "message": issue.message} for issue in validation.issues]
+                return _json_response(
+                    start_response,
+                    HTTPStatus.UNPROCESSABLE_ENTITY,
+                    _error_envelope(
+                        request_id=request_id,
+                        code="invalid_job_spec",
+                        message="Generated JobSpec failed schema validation",
+                        retryable=False,
+                        details=issue_summary,
+                    ),
+                )
+
+            self._repository.persist_job_spec(ingestion_id=existing_record.ingestion_id, job_spec=job_spec_payload)
+            refreshed = self._repository.get_by_id(existing_record.ingestion_id)
+            if refreshed is not None:
+                existing_record = refreshed
+
         return _json_response(
             start_response,
             HTTPStatus.ACCEPTED,
@@ -161,10 +457,1044 @@ class JobIngestionAPI:
             ),
         )
 
+    def _handle_create_candidate(self, environ: dict[str, Any], start_response: Any, *, request_id: str) -> list[bytes]:
+        idempotency_key = str(environ.get("HTTP_IDEMPOTENCY_KEY", "")).strip()
+        if not idempotency_key:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Idempotency-Key header is required",
+                    retryable=False,
+                    details=[{"field": "Idempotency-Key", "reason": "required"}],
+                ),
+            )
+
+        payload, payload_error = _parse_json_payload(environ)
+        if payload_error:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message=payload_error,
+                    retryable=False,
+                ),
+            )
+
+        validation_errors = _validate_create_candidate_payload(payload)
+        if validation_errors:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Request body validation failed",
+                    retryable=False,
+                    details=validation_errors,
+                ),
+            )
+
+        candidate_id = str(payload["candidate_id"]) if payload.get("candidate_id") is not None else None
+        cv_text = str(payload["cv_text"]) if payload.get("cv_text") is not None else None
+        cv_document_ref = str(payload["cv_document_ref"]) if payload.get("cv_document_ref") is not None else None
+        story_notes = [str(item) for item in payload["story_notes"]] if isinstance(payload.get("story_notes"), list) else None
+        target_roles = [str(item) for item in payload["target_roles"]] if isinstance(payload.get("target_roles"), list) else None
+        target_locale = str(payload.get("target_locale") or "en-US")
+
+        create_result = self._repository.create_or_get_candidate(
+            idempotency_key=idempotency_key,
+            candidate_id=candidate_id,
+            cv_text=cv_text,
+            cv_document_ref=cv_document_ref,
+            story_notes=story_notes,
+            target_roles=target_roles,
+            target_locale=target_locale,
+        )
+
+        existing_record = create_result.record
+        if not create_result.created and (
+            existing_record.candidate_id != candidate_id
+            or existing_record.cv_text != cv_text
+            or existing_record.cv_document_ref != cv_document_ref
+            or existing_record.story_notes != story_notes
+            or existing_record.target_roles != target_roles
+            or existing_record.target_locale != target_locale
+        ):
+            return _json_response(
+                start_response,
+                HTTPStatus.CONFLICT,
+                _error_envelope(
+                    request_id=request_id,
+                    code="idempotency_key_conflict",
+                    message="Idempotency-Key is already associated with a different request",
+                    retryable=False,
+                ),
+            )
+
+        if not existing_record.result_candidate_id:
+            candidate_profile_payload = self._build_candidate_profile_payload(existing_record)
+            storybank_entries = self._build_candidate_storybank_payload(
+                candidate_profile_payload=candidate_profile_payload,
+                record=existing_record,
+            )
+
+            candidate_profile_with_storybank = dict(candidate_profile_payload)
+            if storybank_entries:
+                candidate_profile_with_storybank["storybank"] = storybank_entries
+
+            validation = self._schema_validator.validate("CandidateProfile", candidate_profile_with_storybank)
+            if not validation.is_valid:
+                issue_summary = [{"path": issue.path, "message": issue.message} for issue in validation.issues]
+                return _json_response(
+                    start_response,
+                    HTTPStatus.UNPROCESSABLE_ENTITY,
+                    _error_envelope(
+                        request_id=request_id,
+                        code="invalid_candidate_profile",
+                        message="Generated CandidateProfile failed schema validation",
+                        retryable=False,
+                        details=issue_summary,
+                    ),
+                )
+
+            self._repository.persist_candidate_profile(
+                ingestion_id=existing_record.ingestion_id,
+                candidate_profile=candidate_profile_payload,
+            )
+            self._repository.replace_candidate_storybank(
+                candidate_id=str(candidate_profile_payload["candidate_id"]),
+                stories=storybank_entries,
+            )
+            refreshed = self._repository.get_candidate_by_id(existing_record.ingestion_id)
+            if refreshed is not None:
+                existing_record = refreshed
+
+        return _json_response(
+            start_response,
+            HTTPStatus.ACCEPTED,
+            _success_envelope(
+                request_id=request_id,
+                data={
+                    "ingestion_id": existing_record.ingestion_id,
+                    "status": "queued",
+                },
+            ),
+        )
+
+    def _handle_get_candidate(self, start_response: Any, *, request_id: str, ingestion_id: str) -> list[bytes]:
+        record = self._repository.get_candidate_by_id(ingestion_id)
+        if record is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Candidate ingestion not found",
+                    retryable=False,
+                ),
+            )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.OK,
+            _success_envelope(
+                request_id=request_id,
+                data=_candidate_status_payload(record),
+            ),
+        )
+
+    def _handle_get_candidate_profile(self, start_response: Any, *, request_id: str, candidate_id: str) -> list[bytes]:
+        profile = self._repository.get_candidate_profile_by_id(candidate_id)
+        if profile is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Candidate profile not found",
+                    retryable=False,
+                ),
+            )
+
+        storybank_items = self._repository.get_candidate_storybank(candidate_id=candidate_id)
+        if storybank_items:
+            profile = dict(profile)
+            profile["storybank"] = storybank_items
+
+        return _json_response(
+            start_response,
+            HTTPStatus.OK,
+            _success_envelope(request_id=request_id, data=profile),
+        )
+
+    def _handle_get_candidate_storybank(
+        self,
+        environ: dict[str, Any],
+        start_response: Any,
+        *,
+        request_id: str,
+        candidate_id: str,
+    ) -> list[bytes]:
+        profile = self._repository.get_candidate_profile_by_id(candidate_id)
+        if profile is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Candidate profile not found",
+                    retryable=False,
+                ),
+            )
+
+        query, query_errors = _parse_storybank_query(environ)
+        if query_errors:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Query parameter validation failed",
+                    retryable=False,
+                    details=query_errors,
+                ),
+            )
+
+        items, next_cursor = self._repository.list_candidate_storybank(
+            candidate_id=candidate_id,
+            min_quality=query["min_quality"],
+            competency=query["competency"],
+            limit=query["limit"],
+            cursor_offset=query["cursor_offset"],
+        )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.OK,
+            _success_envelope(
+                request_id=request_id,
+                data={
+                    "items": items,
+                    "next_cursor": next_cursor,
+                },
+            ),
+        )
+
+    def _handle_create_interview_session(
+        self,
+        environ: dict[str, Any],
+        start_response: Any,
+        *,
+        request_id: str,
+    ) -> list[bytes]:
+        payload, payload_error = _parse_json_payload(environ)
+        if payload_error:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message=payload_error,
+                    retryable=False,
+                ),
+            )
+
+        validation_errors = _validate_create_interview_session_payload(payload)
+        if validation_errors:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Request body validation failed",
+                    retryable=False,
+                    details=validation_errors,
+                ),
+            )
+
+        job_spec_id = str(payload["job_spec_id"])
+        candidate_id = str(payload["candidate_id"])
+        mode = str(payload.get("mode") or "mock_interview")
+
+        job_spec = self._repository.get_job_spec_by_id(job_spec_id)
+        if job_spec is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Job spec not found",
+                    retryable=False,
+                ),
+            )
+
+        candidate_profile = self._repository.get_candidate_profile_by_id(candidate_id)
+        if candidate_profile is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Candidate profile not found",
+                    retryable=False,
+                ),
+            )
+
+        interview_session_payload = self._build_interview_session_payload(
+            job_spec_id=job_spec_id,
+            candidate_id=candidate_id,
+            mode=mode,
+            job_spec=job_spec,
+            candidate_profile=candidate_profile,
+        )
+        validation = self._schema_validator.validate("InterviewSession", interview_session_payload)
+        if not validation.is_valid:
+            issue_summary = [{"path": issue.path, "message": issue.message} for issue in validation.issues]
+            return _json_response(
+                start_response,
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_interview_session",
+                    message="Generated InterviewSession failed schema validation",
+                    retryable=False,
+                    details=issue_summary,
+                ),
+            )
+
+        try:
+            self._repository.create_interview_session(interview_session=interview_session_payload)
+        except Exception:
+            return _json_response(
+                start_response,
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                _error_envelope(
+                    request_id=request_id,
+                    code="internal_error",
+                    message="Interview session could not be persisted",
+                    retryable=True,
+                ),
+            )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.CREATED,
+            _success_envelope(request_id=request_id, data=interview_session_payload),
+        )
+
+    def _handle_get_interview_session(
+        self,
+        start_response: Any,
+        *,
+        request_id: str,
+        session_id: str,
+    ) -> list[bytes]:
+        payload = self._repository.get_interview_session_by_id(session_id)
+        if payload is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Interview session not found",
+                    retryable=False,
+                ),
+            )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.OK,
+            _success_envelope(request_id=request_id, data=payload),
+        )
+
+    def _handle_create_feedback_report(
+        self,
+        environ: dict[str, Any],
+        start_response: Any,
+        *,
+        request_id: str,
+    ) -> list[bytes]:
+        idempotency_key = str(environ.get("HTTP_IDEMPOTENCY_KEY", "")).strip()
+        if not idempotency_key:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Idempotency-Key header is required",
+                    retryable=False,
+                    details=[{"field": "Idempotency-Key", "reason": "required"}],
+                ),
+            )
+
+        payload, payload_error = _parse_json_payload(environ)
+        if payload_error:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message=payload_error,
+                    retryable=False,
+                ),
+            )
+
+        validation_errors = _validate_create_feedback_report_payload(payload)
+        if validation_errors:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Request body validation failed",
+                    retryable=False,
+                    details=validation_errors,
+                ),
+            )
+
+        session_id = str(payload["session_id"])
+        session = self._repository.get_interview_session_by_id(session_id)
+        if session is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Interview session not found",
+                    retryable=False,
+                ),
+            )
+
+        feedback_report_payload = self._build_feedback_report_payload(session)
+        validation = self._schema_validator.validate("FeedbackReport", feedback_report_payload)
+        if not validation.is_valid:
+            issue_summary = [{"path": issue.path, "message": issue.message} for issue in validation.issues]
+            return _json_response(
+                start_response,
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_feedback_report",
+                    message="Generated FeedbackReport failed schema validation",
+                    retryable=False,
+                    details=issue_summary,
+                ),
+            )
+
+        create_result = self._repository.create_or_get_feedback_report(
+            idempotency_key=idempotency_key,
+            request_payload=payload,
+            feedback_report=feedback_report_payload,
+        )
+        if create_result.status == "session_not_found":
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Interview session not found",
+                    retryable=False,
+                ),
+            )
+        if create_result.status == "idempotency_conflict":
+            return _json_response(
+                start_response,
+                HTTPStatus.CONFLICT,
+                _error_envelope(
+                    request_id=request_id,
+                    code="idempotency_key_conflict",
+                    message="Idempotency-Key is already associated with a different request",
+                    retryable=False,
+                ),
+            )
+        if create_result.status == "version_conflict":
+            details: list[dict[str, str]] = []
+            if create_result.current_version is not None:
+                details.append(
+                    {
+                        "field": "expected_version",
+                        "reason": f"current version is {create_result.current_version}",
+                    }
+                )
+            return _json_response(
+                start_response,
+                HTTPStatus.CONFLICT,
+                _error_envelope(
+                    request_id=request_id,
+                    code="version_conflict",
+                    message="expected_version does not match current feedback report version",
+                    retryable=False,
+                    details=details or None,
+                ),
+            )
+
+        if create_result.report is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                _error_envelope(
+                    request_id=request_id,
+                    code="internal_error",
+                    message="Feedback report could not be persisted",
+                    retryable=True,
+                ),
+            )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.CREATED,
+            _success_envelope(request_id=request_id, data=create_result.report),
+        )
+
+    def _handle_get_feedback_report(
+        self,
+        start_response: Any,
+        *,
+        request_id: str,
+        feedback_report_id: str,
+    ) -> list[bytes]:
+        payload = self._repository.get_feedback_report_by_id(feedback_report_id)
+        if payload is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Feedback report not found",
+                    retryable=False,
+                ),
+            )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.OK,
+            _success_envelope(request_id=request_id, data=payload),
+        )
+
+    def _handle_append_interview_response(
+        self,
+        environ: dict[str, Any],
+        start_response: Any,
+        *,
+        request_id: str,
+        session_id: str,
+    ) -> list[bytes]:
+        idempotency_key = str(environ.get("HTTP_IDEMPOTENCY_KEY", "")).strip()
+        if not idempotency_key:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Idempotency-Key header is required",
+                    retryable=False,
+                    details=[{"field": "Idempotency-Key", "reason": "required"}],
+                ),
+            )
+
+        payload, payload_error = _parse_json_payload(environ)
+        if payload_error:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message=payload_error,
+                    retryable=False,
+                ),
+            )
+
+        validation_errors = _validate_append_interview_response_payload(payload)
+        if validation_errors:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Request body validation failed",
+                    retryable=False,
+                    details=validation_errors,
+                ),
+            )
+
+        current_session = self._repository.get_interview_session_by_id(session_id)
+        if current_session is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Interview session not found",
+                    retryable=False,
+                ),
+            )
+
+        expected_version = payload.get("expected_version")
+        if expected_version is not None and int(current_session.get("version", 0)) != int(expected_version):
+            return _json_response(
+                start_response,
+                HTTPStatus.CONFLICT,
+                _error_envelope(
+                    request_id=request_id,
+                    code="version_conflict",
+                    message="Interview session version conflict",
+                    retryable=False,
+                    details=[
+                        {
+                            "field": "expected_version",
+                            "reason": f"current version is {int(current_session.get('version', 0))}",
+                        }
+                    ],
+                ),
+            )
+
+        try:
+            updated_session, question_id, score = _apply_interview_response_to_session(
+                current_session,
+                payload,
+                followup_selector=self._interview_followup_selector,
+            )
+        except ValueError as exc:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message=str(exc),
+                    retryable=False,
+                ),
+            )
+
+        validation = self._schema_validator.validate("InterviewSession", updated_session)
+        if not validation.is_valid:
+            issue_summary = [{"path": issue.path, "message": issue.message} for issue in validation.issues]
+            return _json_response(
+                start_response,
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_interview_session",
+                    message="Updated InterviewSession failed schema validation",
+                    retryable=False,
+                    details=issue_summary,
+                ),
+            )
+
+        apply_result = self._repository.apply_interview_response(
+            session_id=session_id,
+            idempotency_key=idempotency_key,
+            request_payload=payload,
+            updated_session=updated_session,
+            question_id=question_id,
+            response_text=str(payload["response"]),
+            score=score,
+        )
+
+        if apply_result.status == "not_found":
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Interview session not found",
+                    retryable=False,
+                ),
+            )
+
+        if apply_result.status == "idempotency_conflict":
+            return _json_response(
+                start_response,
+                HTTPStatus.CONFLICT,
+                _error_envelope(
+                    request_id=request_id,
+                    code="idempotency_key_conflict",
+                    message="Idempotency-Key is already associated with a different request",
+                    retryable=False,
+                ),
+            )
+
+        if apply_result.status == "version_conflict":
+            details = []
+            if apply_result.current_version is not None:
+                details.append(
+                    {
+                        "field": "session.version",
+                        "reason": f"current version is {apply_result.current_version}",
+                    }
+                )
+            return _json_response(
+                start_response,
+                HTTPStatus.CONFLICT,
+                _error_envelope(
+                    request_id=request_id,
+                    code="version_conflict",
+                    message="Interview session version conflict",
+                    retryable=False,
+                    details=details or None,
+                ),
+            )
+
+        if apply_result.session is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                _error_envelope(
+                    request_id=request_id,
+                    code="internal_error",
+                    message="Interview session could not be loaded after update",
+                    retryable=True,
+                ),
+            )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.OK,
+            _success_envelope(request_id=request_id, data=apply_result.session),
+        )
+
+    def _handle_get_job_spec(self, start_response: Any, *, request_id: str, job_spec_id: str) -> list[bytes]:
+        payload = self._repository.get_job_spec_by_id(job_spec_id)
+        if payload is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Job spec not found",
+                    retryable=False,
+                ),
+            )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.OK,
+            _success_envelope(request_id=request_id, data=payload),
+        )
+
+    def _handle_patch_job_spec_review(
+        self,
+        environ: dict[str, Any],
+        start_response: Any,
+        *,
+        request_id: str,
+        job_spec_id: str,
+    ) -> list[bytes]:
+        payload, payload_error = _parse_json_payload(environ)
+        if payload_error:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message=payload_error,
+                    retryable=False,
+                ),
+            )
+
+        validation_errors = _validate_patch_review_payload(payload)
+        if validation_errors:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Request body validation failed",
+                    retryable=False,
+                    details=validation_errors,
+                ),
+            )
+
+        patch_object = payload["patch"]
+        patch_errors = _validate_job_spec_patch_object(patch_object)
+        if patch_errors:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Patch payload validation failed",
+                    retryable=False,
+                    details=patch_errors,
+                ),
+            )
+
+        current_job_spec = self._repository.get_job_spec_by_id(job_spec_id)
+        if current_job_spec is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Job spec not found",
+                    retryable=False,
+                ),
+            )
+
+        expected_version = int(payload["expected_version"])
+        updated_job_spec = _apply_job_spec_patch(current_job_spec, patch_object)
+        updated_job_spec["version"] = expected_version + 1
+
+        validation = self._schema_validator.validate("JobSpec", updated_job_spec)
+        if not validation.is_valid:
+            issues = [{"path": issue.path, "message": issue.message} for issue in validation.issues]
+            return _json_response(
+                start_response,
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_job_spec_patch",
+                    message="Patched JobSpec failed schema validation",
+                    retryable=False,
+                    details=issues,
+                ),
+            )
+
+        review_notes = payload.get("review_notes")
+        reviewed_by = payload.get("reviewed_by")
+        review_result = self._repository.apply_job_spec_review(
+            job_spec_id=job_spec_id,
+            expected_version=expected_version,
+            updated_job_spec=updated_job_spec,
+            patch=patch_object,
+            review_notes=str(review_notes) if review_notes is not None else None,
+            reviewed_by=str(reviewed_by) if reviewed_by is not None else None,
+        )
+
+        if review_result.status == "not_found":
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Job spec not found",
+                    retryable=False,
+                ),
+            )
+
+        if review_result.status == "version_conflict":
+            details = []
+            if review_result.current_version is not None:
+                details.append(
+                    {
+                        "field": "expected_version",
+                        "reason": f"current version is {review_result.current_version}",
+                    }
+                )
+            return _json_response(
+                start_response,
+                HTTPStatus.CONFLICT,
+                _error_envelope(
+                    request_id=request_id,
+                    code="version_conflict",
+                    message="Job spec version conflict",
+                    retryable=False,
+                    details=details or None,
+                ),
+            )
+
+        if review_result.job_spec is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                _error_envelope(
+                    request_id=request_id,
+                    code="internal_error",
+                    message="Updated job spec could not be loaded",
+                    retryable=True,
+                ),
+            )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.OK,
+            _success_envelope(request_id=request_id, data=review_result.job_spec),
+        )
+
+    def _build_job_spec_payload(self, record: JobIngestionRecord) -> dict[str, Any]:
+        extracted = self._extraction_worker.extract(source_type=record.source_type, source_value=record.source_value)
+        sections = _sections_by_id(extracted.sections)
+
+        responsibilities = _collect_lines(sections, preferred_keys=("responsibilities", "overview"))
+        if not responsibilities:
+            responsibilities = [extracted.role_title]
+
+        required_lines = _collect_lines(sections, preferred_keys=("requirements",))
+        preferred_lines = _collect_lines(sections, preferred_keys=("preferred_qualifications",))
+
+        required_terms = _extract_skill_terms(required_lines, self._taxonomy_normalizer)
+        preferred_terms = _extract_skill_terms(preferred_lines, self._taxonomy_normalizer)
+
+        normalized_terms = _TAXONOMY_MODULE.normalize_job_requirement_terms(
+            required_skills=required_terms,
+            preferred_skills=preferred_terms,
+            normalizer=self._taxonomy_normalizer,
+        )
+
+        required_skills = _normalized_term_labels(normalized_terms["required"])
+        preferred_skills = _normalized_term_labels(normalized_terms["preferred"])
+        competency_weights = _competency_weights(normalized_terms["required"], normalized_terms["preferred"])
+
+        evidence_spans = _build_evidence_spans(
+            responsibilities=responsibilities,
+            required_terms=normalized_terms["required"],
+            preferred_terms=normalized_terms["preferred"],
+        )
+        extraction_confidence = _extraction_confidence(evidence_spans)
+
+        job_spec_suffix = record.ingestion_id[4:] if record.ingestion_id.startswith("ing_") else record.ingestion_id
+        job_spec_id = f"job_{job_spec_suffix}"
+
+        payload: dict[str, Any] = {
+            "job_spec_id": job_spec_id,
+            "source": {
+                "type": record.source_type,
+                "value": record.source_value,
+                "captured_at": _utc_timestamp(),
+            },
+            "role_title": extracted.role_title,
+            "responsibilities": responsibilities,
+            "requirements": {
+                "required_skills": required_skills,
+                "preferred_skills": preferred_skills,
+            },
+            "competency_weights": competency_weights,
+            "evidence_spans": evidence_spans,
+            "extraction_confidence": extraction_confidence,
+            "taxonomy_version": "m1-taxonomy-v1",
+            "version": 1,
+        }
+
+        return payload
+
+    def _build_candidate_profile_payload(self, record: CandidateIngestionRecord) -> dict[str, Any]:
+        return self._candidate_profile_parser.parse(
+            ingestion_id=record.ingestion_id,
+            candidate_id=record.candidate_id,
+            cv_text=record.cv_text,
+            cv_document_ref=record.cv_document_ref,
+            target_roles=record.target_roles,
+            story_notes=record.story_notes,
+        )
+
+    def _build_candidate_storybank_payload(
+        self,
+        *,
+        candidate_profile_payload: dict[str, Any],
+        record: CandidateIngestionRecord,
+    ) -> list[dict[str, Any]]:
+        return self._candidate_storybank_generator.generate(
+            candidate_id=str(candidate_profile_payload["candidate_id"]),
+            experiences=list(candidate_profile_payload.get("experience", [])),
+            story_notes=record.story_notes,
+        )
+
+    def _build_interview_session_payload(
+        self,
+        *,
+        job_spec_id: str,
+        candidate_id: str,
+        mode: str,
+        job_spec: dict[str, Any],
+        candidate_profile: dict[str, Any],
+    ) -> dict[str, Any]:
+        session_id = f"sess_{uuid4().hex}"
+        questions = self._interview_question_planner.plan_opening_questions(
+            session_id=session_id,
+            job_spec=job_spec,
+            candidate_profile=candidate_profile,
+        )
+
+        return {
+            "session_id": session_id,
+            "job_spec_id": job_spec_id,
+            "candidate_id": candidate_id,
+            "mode": mode,
+            "status": "in_progress",
+            "questions": questions,
+            "scores": {},
+            "overall_score": 0.0,
+            "root_cause_tags": [],
+            "created_at": _utc_timestamp(),
+            "version": 1,
+        }
+
+    def _build_feedback_report_payload(self, session: dict[str, Any]) -> dict[str, Any]:
+        session_id = str(session["session_id"])
+        competency_scores, aggregated_overall_score = _aggregate_feedback_scores(session)
+        top_gaps = _feedback_top_gaps(session=session, competency_scores=competency_scores)
+        action_plan = _feedback_action_plan(top_gaps)
+        answer_rewrites = _feedback_answer_rewrites(session=session, top_gaps=top_gaps)
+
+        payload: dict[str, Any] = {
+            "feedback_report_id": f"fb_{uuid4().hex}",
+            "session_id": session_id,
+            "top_gaps": top_gaps,
+            "action_plan": action_plan,
+            "overall_score": round(aggregated_overall_score, 2),
+            "generated_at": _utc_timestamp(),
+        }
+        if competency_scores:
+            payload["competency_scores"] = competency_scores
+        if answer_rewrites:
+            payload["answer_rewrites"] = answer_rewrites
+
+        if aggregated_overall_score < 70.0:
+            payload["trajectory_update"] = "Focus next sessions on critical gap competencies before raising difficulty."
+
+        return payload
+
 
 def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
     resolved_db_path = db_path or os.environ.get("JOBCOACH_DB_PATH") or ".tmp/migrate-local.sqlite3"
-    return JobIngestionAPI(repository=SQLiteJobIngestionRepository(resolved_db_path))
+    extraction_worker = _JOB_EXTRACTION_MODULE.JobExtractionWorker()
+    taxonomy_normalizer = _TAXONOMY_MODULE.TaxonomyNormalizer.from_file()
+    schema_validator = _SCHEMA_VALIDATOR_MODULE.CoreSchemaValidator.from_file()
+    candidate_profile_parser = _CANDIDATE_PROFILE_MODULE.CandidateProfileParser()
+    candidate_storybank_generator = _CANDIDATE_STORYBANK_MODULE.CandidateStorybankGenerator()
+    interview_question_planner = _INTERVIEW_PLANNER_MODULE.DeterministicQuestionPlanner()
+    interview_followup_selector = _INTERVIEW_FOLLOWUP_MODULE.AdaptiveFollowupSelector()
+    return JobIngestionAPI(
+        repository=SQLiteJobIngestionRepository(resolved_db_path),
+        extraction_worker=extraction_worker,
+        taxonomy_normalizer=taxonomy_normalizer,
+        schema_validator=schema_validator,
+        candidate_profile_parser=candidate_profile_parser,
+        candidate_storybank_generator=candidate_storybank_generator,
+        interview_question_planner=interview_question_planner,
+        interview_followup_selector=interview_followup_selector,
+    )
 
 
 def _parse_json_payload(environ: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
@@ -213,6 +1543,261 @@ def _validate_create_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
     return errors
 
 
+def _validate_create_candidate_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+
+    candidate_id = payload.get("candidate_id")
+    if candidate_id is not None and (not isinstance(candidate_id, str) or not candidate_id):
+        errors.append({"field": "candidate_id", "reason": "must be a non-empty string when provided"})
+
+    cv_text = payload.get("cv_text")
+    has_cv_text = isinstance(cv_text, str) and bool(cv_text.strip())
+    if cv_text is not None and not has_cv_text:
+        errors.append({"field": "cv_text", "reason": "must be a non-empty string when provided"})
+
+    cv_document_ref = payload.get("cv_document_ref")
+    has_cv_document_ref = isinstance(cv_document_ref, str) and bool(cv_document_ref.strip())
+    if cv_document_ref is not None and not has_cv_document_ref:
+        errors.append({"field": "cv_document_ref", "reason": "must be a non-empty string when provided"})
+
+    if has_cv_text == has_cv_document_ref:
+        errors.append(
+            {
+                "field": "cv_text/cv_document_ref",
+                "reason": "exactly one of cv_text or cv_document_ref must be provided",
+            }
+        )
+
+    story_notes = payload.get("story_notes")
+    if story_notes is not None:
+        if not isinstance(story_notes, list):
+            errors.append({"field": "story_notes", "reason": "must be an array of strings when provided"})
+        else:
+            for idx, value in enumerate(story_notes):
+                if not isinstance(value, str):
+                    errors.append({"field": f"story_notes[{idx}]", "reason": "must be a string"})
+
+    target_roles = payload.get("target_roles")
+    if target_roles is not None:
+        if not isinstance(target_roles, list):
+            errors.append({"field": "target_roles", "reason": "must be an array of strings when provided"})
+        else:
+            for idx, value in enumerate(target_roles):
+                if not isinstance(value, str):
+                    errors.append({"field": f"target_roles[{idx}]", "reason": "must be a string"})
+
+    target_locale = payload.get("target_locale")
+    if target_locale is not None and (not isinstance(target_locale, str) or not target_locale):
+        errors.append({"field": "target_locale", "reason": "must be a non-empty string when provided"})
+
+    return errors
+
+
+def _validate_create_interview_session_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+
+    job_spec_id = payload.get("job_spec_id")
+    if not isinstance(job_spec_id, str) or not job_spec_id.strip():
+        errors.append({"field": "job_spec_id", "reason": "must be a non-empty string"})
+
+    candidate_id = payload.get("candidate_id")
+    if not isinstance(candidate_id, str) or not candidate_id.strip():
+        errors.append({"field": "candidate_id", "reason": "must be a non-empty string"})
+
+    mode = payload.get("mode")
+    if mode is not None and (not isinstance(mode, str) or mode not in INTERVIEW_MODE_VALUES):
+        errors.append({"field": "mode", "reason": "must be one of: mock_interview, drill, negotiation"})
+
+    return errors
+
+
+def _validate_create_feedback_report_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id.strip():
+        errors.append({"field": "session_id", "reason": "must be a non-empty string"})
+
+    expected_version = payload.get("expected_version")
+    if expected_version is not None and (
+        not isinstance(expected_version, int) or isinstance(expected_version, bool) or expected_version < 0
+    ):
+        errors.append({"field": "expected_version", "reason": "must be an integer >= 0 when provided"})
+
+    regenerate = payload.get("regenerate")
+    if regenerate is not None and not isinstance(regenerate, bool):
+        errors.append({"field": "regenerate", "reason": "must be a boolean when provided"})
+
+    return errors
+
+
+def _validate_append_interview_response_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+
+    response = payload.get("response")
+    if not isinstance(response, str) or not response.strip():
+        errors.append({"field": "response", "reason": "must be a non-empty string"})
+
+    question_id = payload.get("question_id")
+    if question_id is not None and (not isinstance(question_id, str) or not question_id.strip()):
+        errors.append({"field": "question_id", "reason": "must be a non-empty string when provided"})
+
+    expected_version = payload.get("expected_version")
+    if expected_version is not None and (
+        not isinstance(expected_version, int) or isinstance(expected_version, bool) or expected_version < 1
+    ):
+        errors.append({"field": "expected_version", "reason": "must be an integer >= 1 when provided"})
+
+    override_followup = payload.get("override_followup")
+    if override_followup is not None:
+        if not isinstance(override_followup, dict):
+            errors.append({"field": "override_followup", "reason": "must be an object when provided"})
+        else:
+            reviewer_id = override_followup.get("reviewer_id")
+            if not isinstance(reviewer_id, str) or not reviewer_id.strip():
+                errors.append({"field": "override_followup.reviewer_id", "reason": "must be a non-empty string"})
+
+            reason = override_followup.get("reason")
+            if not isinstance(reason, str) or not reason.strip():
+                errors.append({"field": "override_followup.reason", "reason": "must be a non-empty string"})
+
+            competency = override_followup.get("competency")
+            if not isinstance(competency, str) or not competency.strip():
+                errors.append({"field": "override_followup.competency", "reason": "must be a non-empty string"})
+
+            difficulty = override_followup.get("difficulty")
+            if difficulty is not None and (
+                not isinstance(difficulty, int) or isinstance(difficulty, bool) or difficulty < 1 or difficulty > 5
+            ):
+                errors.append({"field": "override_followup.difficulty", "reason": "must be an integer between 1 and 5"})
+
+    return errors
+
+
+def _parse_storybank_query(environ: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    query_string = str(environ.get("QUERY_STRING", ""))
+    query_map = parse_qs(query_string, keep_blank_values=True)
+    errors: list[dict[str, str]] = []
+
+    min_quality: float | None = None
+    raw_min_quality = _first_query_value(query_map, "min_quality")
+    if raw_min_quality is not None:
+        try:
+            min_quality = float(raw_min_quality)
+        except ValueError:
+            errors.append({"field": "min_quality", "reason": "must be a number between 0 and 1"})
+        else:
+            if min_quality < 0 or min_quality > 1:
+                errors.append({"field": "min_quality", "reason": "must be between 0 and 1"})
+
+    competency: str | None = None
+    raw_competency = _first_query_value(query_map, "competency")
+    if raw_competency is not None:
+        competency = raw_competency.strip()
+        if not competency:
+            errors.append({"field": "competency", "reason": "must be a non-empty string when provided"})
+
+    limit = 20
+    raw_limit = _first_query_value(query_map, "limit")
+    if raw_limit is not None:
+        try:
+            limit = int(raw_limit)
+        except ValueError:
+            errors.append({"field": "limit", "reason": "must be an integer between 1 and 100"})
+        else:
+            if limit < 1 or limit > 100:
+                errors.append({"field": "limit", "reason": "must be an integer between 1 and 100"})
+
+    cursor_offset = 0
+    raw_cursor = _first_query_value(query_map, "cursor")
+    if raw_cursor is not None:
+        try:
+            cursor_offset = int(raw_cursor)
+        except ValueError:
+            errors.append({"field": "cursor", "reason": "must be a non-negative integer offset"})
+        else:
+            if cursor_offset < 0:
+                errors.append({"field": "cursor", "reason": "must be a non-negative integer offset"})
+
+    return {
+        "min_quality": min_quality,
+        "competency": competency,
+        "limit": limit,
+        "cursor_offset": cursor_offset,
+    }, errors
+
+
+def _first_query_value(query_map: dict[str, list[str]], field: str) -> str | None:
+    values = query_map.get(field)
+    if not values:
+        return None
+    return values[0]
+
+
+def _validate_patch_review_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+
+    expected_version = payload.get("expected_version")
+    if not isinstance(expected_version, int) or isinstance(expected_version, bool) or expected_version < 1:
+        errors.append({"field": "expected_version", "reason": "must be an integer >= 1"})
+
+    patch = payload.get("patch")
+    if not isinstance(patch, dict):
+        errors.append({"field": "patch", "reason": "must be an object"})
+
+    review_notes = payload.get("review_notes")
+    if review_notes is not None and not isinstance(review_notes, str):
+        errors.append({"field": "review_notes", "reason": "must be a string when provided"})
+
+    reviewed_by = payload.get("reviewed_by")
+    if reviewed_by is not None and not isinstance(reviewed_by, str):
+        errors.append({"field": "reviewed_by", "reason": "must be a string when provided"})
+
+    return errors
+
+
+def _validate_job_spec_patch_object(patch: dict[str, Any]) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+    if not patch:
+        errors.append({"field": "patch", "reason": "must contain at least one mutable field"})
+        return errors
+
+    for field in patch:
+        if field in IMMUTABLE_JOB_SPEC_PATCH_FIELDS:
+            errors.append({"field": f"patch.{field}", "reason": "field is immutable"})
+            continue
+        if field not in MUTABLE_JOB_SPEC_PATCH_FIELDS:
+            errors.append({"field": f"patch.{field}", "reason": "field is not supported for review patch"})
+
+    return errors
+
+
+def _apply_job_spec_patch(current_job_spec: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    updated = json.loads(json.dumps(current_job_spec))
+
+    for field, value in patch.items():
+        if field not in MUTABLE_JOB_SPEC_PATCH_FIELDS:
+            continue
+
+        current_value = updated.get(field)
+        if isinstance(current_value, dict) and isinstance(value, dict):
+            updated[field] = _deep_merge_dict(current_value, value)
+        else:
+            updated[field] = value
+
+    return updated
+
+
+def _deep_merge_dict(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = dict(base)
+    for key, value in patch.items():
+        if isinstance(merged.get(key), dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_dict(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def _status_payload(record: JobIngestionRecord) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "ingestion_id": record.ingestion_id,
@@ -239,16 +1824,741 @@ def _status_payload(record: JobIngestionRecord) -> dict[str, Any]:
     return payload
 
 
+def _candidate_status_payload(record: CandidateIngestionRecord) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "ingestion_id": record.ingestion_id,
+        "status": record.status,
+        "current_stage": record.current_stage,
+    }
+
+    if record.progress_pct is not None:
+        payload["progress_pct"] = record.progress_pct
+
+    if record.result_candidate_id:
+        payload["result"] = {"entity_id": record.result_candidate_id}
+
+    if record.error_code and record.error_message and record.error_retryable is not None:
+        error_payload: dict[str, Any] = {
+            "code": record.error_code,
+            "message": record.error_message,
+            "retryable": record.error_retryable,
+        }
+        if record.error_details:
+            error_payload["details"] = record.error_details
+        payload["error"] = error_payload
+
+    return payload
+
+
+def _sections_by_id(sections: tuple[Any, ...]) -> dict[str, list[str]]:
+    grouped: dict[str, list[str]] = {}
+    for section in sections:
+        section_id = str(getattr(section, "section_id", "")).strip()
+        lines = getattr(section, "lines", ())
+        if not section_id:
+            continue
+        clean_lines = [_clean_line(str(line)) for line in lines if _clean_line(str(line))]
+        if clean_lines:
+            grouped.setdefault(section_id, []).extend(clean_lines)
+    return grouped
+
+
+def _collect_lines(sections: dict[str, list[str]], *, preferred_keys: tuple[str, ...]) -> list[str]:
+    combined: list[str] = []
+    for key in preferred_keys:
+        combined.extend(sections.get(key, []))
+    return _unique_preserving_order(combined)
+
+
+def _clean_line(value: str) -> str:
+    line = value.strip()
+    line = re.sub(r"^[-*]\s*", "", line)
+    return line.strip()
+
+
+def _extract_skill_terms(lines: list[str], normalizer: Any) -> list[str]:
+    alias_map = getattr(normalizer, "_alias_to_canonical", {})
+    aliases = sorted([alias for alias in alias_map if isinstance(alias, str) and alias], key=len, reverse=True)
+
+    matched: list[str] = []
+    for line in lines:
+        normalized_line = re.sub(r"[^a-z0-9\s]+", " ", line.lower())
+        normalized_line = re.sub(r"\s+", " ", normalized_line).strip()
+        for alias in aliases:
+            if re.search(rf"(^|\s){re.escape(alias)}(\s|$)", normalized_line):
+                matched.append(alias)
+
+    if matched:
+        return _unique_preserving_order(matched)
+
+    fallback_terms: list[str] = []
+    for line in lines:
+        parts = re.split(r",|/|\band\b", line, flags=re.IGNORECASE)
+        for part in parts:
+            cleaned = _clean_line(part)
+            if cleaned:
+                fallback_terms.append(cleaned)
+
+    return _unique_preserving_order(fallback_terms)
+
+
+def _normalized_term_labels(normalized_terms: tuple[Any, ...]) -> list[str]:
+    labels: list[str] = []
+    for term in normalized_terms:
+        is_known = bool(getattr(term, "is_known", False))
+        if is_known:
+            label = str(getattr(term, "canonical_label", "")).strip()
+        else:
+            label = str(getattr(term, "input_term", "")).strip()
+        if label:
+            labels.append(label)
+    return _unique_preserving_order(labels)
+
+
+def _competency_weights(required_terms: tuple[Any, ...], preferred_terms: tuple[Any, ...]) -> dict[str, float]:
+    weights: dict[str, float] = {}
+
+    for term in required_terms:
+        if not bool(getattr(term, "is_known", False)):
+            continue
+        canonical_id = str(getattr(term, "canonical_id", "")).strip()
+        if canonical_id:
+            weights[canonical_id] = 1.0
+
+    for term in preferred_terms:
+        if not bool(getattr(term, "is_known", False)):
+            continue
+        canonical_id = str(getattr(term, "canonical_id", "")).strip()
+        if canonical_id:
+            weights[canonical_id] = max(weights.get(canonical_id, 0.0), 0.65)
+
+    return weights
+
+
+def _build_evidence_spans(
+    *,
+    responsibilities: list[str],
+    required_terms: tuple[Any, ...],
+    preferred_terms: tuple[Any, ...],
+) -> list[dict[str, Any]]:
+    evidence_spans: list[dict[str, Any]] = []
+
+    for idx, text in enumerate(responsibilities):
+        evidence_spans.append(
+            {
+                "field": f"responsibilities[{idx}]",
+                "text": text,
+                "confidence": 0.85,
+            }
+        )
+
+    for idx, term in enumerate(required_terms):
+        label = str(getattr(term, "canonical_label", "") or getattr(term, "input_term", "")).strip()
+        if not label:
+            continue
+        confidence = 0.95 if bool(getattr(term, "is_known", False)) else 0.5
+        evidence_spans.append(
+            {
+                "field": f"requirements.required_skills[{idx}]",
+                "text": label,
+                "confidence": confidence,
+            }
+        )
+
+    for idx, term in enumerate(preferred_terms):
+        label = str(getattr(term, "canonical_label", "") or getattr(term, "input_term", "")).strip()
+        if not label:
+            continue
+        confidence = 0.8 if bool(getattr(term, "is_known", False)) else 0.45
+        evidence_spans.append(
+            {
+                "field": f"requirements.preferred_skills[{idx}]",
+                "text": label,
+                "confidence": confidence,
+            }
+        )
+
+    return evidence_spans
+
+
+def _extraction_confidence(evidence_spans: list[dict[str, Any]]) -> float:
+    if not evidence_spans:
+        return 0.5
+
+    score = sum(float(span["confidence"]) for span in evidence_spans) / len(evidence_spans)
+    score = max(0.0, min(1.0, score))
+    return round(score, 3)
+
+
+def _unique_preserving_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            ordered.append(value)
+    return ordered
+
+
+def _followup_question_text(competency: str) -> str:
+    label = competency.replace("skill.", "").replace("_", " ").strip()
+    if not label:
+        label = "execution"
+    return f"What tradeoffs did you make while applying {label}, and what was the outcome?"
+
+
+def _apply_interview_response_to_session(
+    current_session: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    followup_selector: Any,
+) -> tuple[dict[str, Any], str, float]:
+    updated = json.loads(json.dumps(current_session))
+    questions_raw = updated.get("questions")
+    if not isinstance(questions_raw, list) or not questions_raw:
+        raise ValueError("Interview session has no questions to answer")
+
+    response_text = str(payload["response"]).strip()
+    requested_question_id = payload.get("question_id")
+    target_index = -1
+
+    if isinstance(requested_question_id, str) and requested_question_id.strip():
+        normalized_question_id = requested_question_id.strip()
+        for idx, question in enumerate(questions_raw):
+            if str(question.get("question_id", "")).strip() == normalized_question_id:
+                target_index = idx
+                break
+        if target_index < 0:
+            raise ValueError("question_id does not exist in interview session")
+    else:
+        for idx, question in enumerate(questions_raw):
+            if not str(question.get("response", "")).strip():
+                target_index = idx
+                break
+        if target_index < 0:
+            target_index = len(questions_raw) - 1
+
+    question = questions_raw[target_index]
+    question_id = str(question.get("question_id", "")).strip()
+    difficulty = int(question.get("difficulty", 1))
+    score = _score_interview_response(response_text=response_text, difficulty=difficulty)
+    question["response"] = response_text
+    question["score"] = score
+
+    scores_map, overall_score = _recompute_interview_scores(questions_raw)
+    updated["scores"] = scores_map
+    updated["overall_score"] = overall_score
+    updated["root_cause_tags"] = sorted([competency for competency, value in scores_map.items() if float(value) < 60.0])
+
+    has_unanswered = any(not str(item.get("response", "")).strip() for item in questions_raw)
+    if not has_unanswered and len(questions_raw) < 5:
+        followup_decision = followup_selector.select_followup(
+            questions=questions_raw,
+            scores=scores_map,
+            last_question=question,
+            last_score=score,
+        )
+        next_competency = str(followup_decision.get("competency", "execution"))
+        next_difficulty = int(followup_decision.get("difficulty", max(1, min(5, difficulty + 1))))
+        next_difficulty = max(1, min(5, next_difficulty))
+        selection_reason = str(followup_decision.get("reason", "coverage_gap")).strip() or "coverage_gap"
+        ranking_position = int(followup_decision.get("ranking_position", len(questions_raw) + 1))
+        deterministic_confidence = float(followup_decision.get("confidence", 0.62))
+        override_followup = payload.get("override_followup")
+        override_applied = False
+        override_reviewer_id = ""
+        override_reason = ""
+        override_trigger_confidence = round(max(0.0, min(1.0, deterministic_confidence)), 3)
+
+        if (
+            isinstance(override_followup, dict)
+            and deterministic_confidence < FOLLOWUP_OVERRIDE_CONFIDENCE_THRESHOLD
+        ):
+            override_competency = str(override_followup.get("competency", "")).strip()
+            if override_competency:
+                next_competency = override_competency
+                selection_reason = "reviewer_override"
+                override_applied = True
+                override_reviewer_id = str(override_followup.get("reviewer_id", "")).strip()
+                override_reason = str(override_followup.get("reason", "")).strip()
+                override_difficulty = override_followup.get("difficulty")
+                if isinstance(override_difficulty, int) and not isinstance(override_difficulty, bool):
+                    next_difficulty = max(1, min(5, int(override_difficulty)))
+                raw_override_ranking = override_followup.get("ranking_position", ranking_position)
+                try:
+                    ranking_position = int(raw_override_ranking)
+                except (TypeError, ValueError):
+                    ranking_position = ranking_position
+                ranking_position = max(1, ranking_position)
+
+        followup_question_id = f"q_{len(questions_raw) + 1}"
+        followup_question = {
+            "question_id": followup_question_id,
+            "text": _followup_question_text(next_competency),
+            "competency": next_competency,
+            "difficulty": next_difficulty,
+            "response": "",
+            "score": 0.0,
+            "planner_metadata": {
+                "source_competency": next_competency,
+                "ranking_position": ranking_position,
+                "deterministic_confidence": round(max(0.5, min(0.99, deterministic_confidence)), 3),
+                "selection_reason": selection_reason,
+                "trigger_question_id": question_id,
+                "trigger_score": score,
+                "override_applied": override_applied,
+                "override_reviewer_id": override_reviewer_id,
+                "override_reason": override_reason,
+                "override_trigger_confidence": override_trigger_confidence,
+            },
+        }
+        questions_raw.append(followup_question)
+        follow_up_ids = question.get("follow_up_ids")
+        if isinstance(follow_up_ids, list):
+            follow_up_ids.append(followup_question_id)
+        else:
+            question["follow_up_ids"] = [followup_question_id]
+        has_unanswered = True
+
+    updated["status"] = "in_progress" if has_unanswered else "completed"
+    updated["version"] = int(current_session.get("version", 1)) + 1
+    return updated, question_id, score
+
+
+def _recompute_interview_scores(questions: list[dict[str, Any]]) -> tuple[dict[str, float], float]:
+    by_competency: dict[str, list[float]] = {}
+    for question in questions:
+        response_text = str(question.get("response", "")).strip()
+        if not response_text:
+            continue
+        competency = str(question.get("competency", "")).strip()
+        if not competency:
+            continue
+        score_value = float(question.get("score", 0.0))
+        by_competency.setdefault(competency, []).append(score_value)
+
+    scores = {
+        competency: round(sum(values) / len(values), 2)
+        for competency, values in by_competency.items()
+        if values
+    }
+    flattened = [score for values in by_competency.values() for score in values]
+    overall = round(sum(flattened) / len(flattened), 2) if flattened else 0.0
+    return scores, overall
+
+
+def _score_interview_response(*, response_text: str, difficulty: int) -> float:
+    words = [part for part in response_text.split() if part]
+    word_count = len(words)
+    has_metric = bool(re.search(r"\b\d+(\.\d+)?%?\b", response_text))
+    has_action_signal = bool(
+        re.search(r"\b(led|built|implemented|optimized|reduced|improved|shipped|designed)\b", response_text, re.IGNORECASE)
+    )
+
+    raw_score = 35.0
+    raw_score += min(word_count, 90) * 0.45
+    raw_score += 12.0 if has_metric else 0.0
+    raw_score += 8.0 if has_action_signal else 0.0
+    raw_score += max(1, min(5, difficulty)) * 2.0
+    return round(max(0.0, min(100.0, raw_score)), 2)
+
+
+def _safe_score(value: Any) -> float:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if score != score:
+        return 0.0
+    return max(0.0, min(100.0, score))
+
+
+def _aggregate_feedback_scores(session: dict[str, Any]) -> tuple[dict[str, float], float]:
+    by_competency: dict[str, list[float]] = {}
+    questions = session.get("questions")
+    if isinstance(questions, list):
+        for question in questions:
+            if not isinstance(question, dict):
+                continue
+            competency = str(question.get("competency", "")).strip()
+            if not competency:
+                continue
+            by_competency.setdefault(competency, []).append(_safe_score(question.get("score")))
+
+    if by_competency:
+        aggregated: dict[str, float] = {}
+        for competency in sorted(by_competency):
+            score_history = by_competency[competency]
+            mean_score = sum(score_history) / len(score_history)
+            trend_adjustment = 0.0
+            if len(score_history) >= 2:
+                trend_adjustment = (score_history[-1] - score_history[0]) * 0.15
+                trend_adjustment = max(-8.0, min(8.0, trend_adjustment))
+
+            aggregated_score = max(0.0, min(100.0, mean_score + trend_adjustment))
+            aggregated[competency] = round(aggregated_score, 2)
+
+        overall = round(sum(aggregated.values()) / len(aggregated), 2) if aggregated else 0.0
+        return aggregated, overall
+
+    raw_scores = session.get("scores")
+    normalized: dict[str, float] = {}
+    if isinstance(raw_scores, dict):
+        for competency, raw_score in sorted(raw_scores.items(), key=lambda item: str(item[0])):
+            if not isinstance(competency, str) or not competency.strip():
+                continue
+            normalized[competency] = round(_safe_score(raw_score), 2)
+        if normalized:
+            overall = round(sum(normalized.values()) / len(normalized), 2)
+            return normalized, overall
+
+    return {}, round(_safe_score(session.get("overall_score")), 2)
+
+
+def _feedback_competency_scores(session: dict[str, Any]) -> dict[str, float]:
+    scores, _ = _aggregate_feedback_scores(session)
+    return scores
+
+
+def _feedback_top_gaps(*, session: dict[str, Any], competency_scores: dict[str, float]) -> list[dict[str, str]]:
+    quality_signals = _feedback_quality_signals(session)
+    ranked_with_risk: list[tuple[str, float, float]] = []
+    for competency, score in competency_scores.items():
+        signal = quality_signals.get(competency, {})
+        risk_score = _feedback_gap_risk_score(score=float(score), signals=signal)
+        ranked_with_risk.append((competency, float(score), risk_score))
+
+    ranked_with_risk.sort(key=lambda item: (item[2], item[1], item[0]))
+    if not ranked_with_risk:
+        root_cause_tags = sorted(
+            {
+                str(item).strip()
+                for item in session.get("root_cause_tags", [])
+                if isinstance(item, str) and str(item).strip()
+            }
+        )
+        ranked_with_risk = [(tag, 55.0, 55.0) for tag in root_cause_tags]
+    if not ranked_with_risk:
+        fallback = _safe_score(session.get("overall_score"))
+        fallback_score = fallback if fallback > 0 else 55.0
+        ranked_with_risk = [("overall_performance", fallback_score, fallback_score)]
+
+    top_gaps: list[dict[str, str]] = []
+    for competency, score, _ in ranked_with_risk[:3]:
+        signal = quality_signals.get(competency, {})
+        top_gaps.append(
+            {
+                "gap": _feedback_gap_label(competency),
+                "severity": _feedback_severity(score=score, signals=signal),
+                "root_cause": _feedback_root_cause(score=score, signals=signal),
+                "evidence": _feedback_gap_evidence(session=session, competency=competency),
+            }
+        )
+    return top_gaps
+
+
+def _feedback_gap_label(competency: str) -> str:
+    label = competency.replace("skill.", "").replace("_", " ").strip()
+    if not label:
+        return "Overall Interview Performance"
+    return label.title()
+
+
+def _feedback_severity(*, score: float, signals: dict[str, float]) -> str:
+    adjusted_score = _feedback_gap_risk_score(score=score, signals=signals)
+    if adjusted_score < 50.0:
+        return "critical"
+    if adjusted_score < 65.0:
+        return "high"
+    if adjusted_score < 80.0:
+        return "medium"
+    return "low"
+
+
+def _feedback_root_cause(*, score: float, signals: dict[str, float]) -> str:
+    answered_count = int(signals.get("answered_count", 0))
+    if answered_count <= 0:
+        return "Responses were missing for this competency, so signal quality could not be established."
+
+    metric_ratio = float(signals.get("metric_ratio", 0.0))
+    action_ratio = float(signals.get("action_ratio", 0.0))
+    avg_words = float(signals.get("avg_words", 0.0))
+    low_score_ratio = float(signals.get("low_score_ratio", 0.0))
+    trend_delta = float(signals.get("trend_delta", 0.0))
+
+    if metric_ratio < 0.34 and avg_words < 16.0:
+        return "Responses were brief and lacked quantified outcomes."
+    if metric_ratio < 0.34:
+        return "Responses lacked quantified outcomes to demonstrate impact."
+    if action_ratio < 0.5:
+        return "Responses did not clearly communicate ownership and actions."
+    if avg_words < 16.0:
+        return "Responses were too brief to demonstrate structured depth."
+    if low_score_ratio >= 0.5 and trend_delta <= -10.0:
+        return "Scores declined across follow-ups, indicating inconsistent response depth."
+    if low_score_ratio >= 0.5:
+        return "Multiple turns stayed below rubric expectations for this competency."
+
+    if score < 50.0:
+        return "Responses lacked enough specificity and measurable outcomes."
+    if score < 65.0:
+        return "Examples showed partial depth but did not fully demonstrate impact."
+    if score < 80.0:
+        return "Signal is promising but consistency and structure need improvement."
+    return "Maintain this area while improving adjacent competencies."
+
+
+def _feedback_gap_evidence(*, session: dict[str, Any], competency: str) -> str:
+    questions = session.get("questions")
+    response_candidates: list[tuple[float, str, str]] = []
+    if isinstance(questions, list):
+        for question in questions:
+            if not isinstance(question, dict):
+                continue
+            question_competency = str(question.get("competency", "")).strip()
+            response_text = str(question.get("response", "")).strip()
+            if question_competency != competency or not response_text:
+                continue
+            question_id = str(question.get("question_id", "question")).strip() or "question"
+            score = _safe_score(question.get("score"))
+            snippet = response_text if len(response_text) <= 140 else f"{response_text[:137]}..."
+            response_candidates.append((score, question_id, snippet))
+    if response_candidates:
+        best = sorted(response_candidates, key=lambda item: (item[0], item[1]))[0]
+        return f"{best[1]} (score={best[0]:.1f}): {best[2]}"
+    return "No response evidence captured for this competency yet."
+
+
+def _feedback_quality_signals(session: dict[str, Any]) -> dict[str, dict[str, float]]:
+    raw: dict[str, dict[str, Any]] = {}
+    questions = session.get("questions")
+    if not isinstance(questions, list):
+        return {}
+
+    for question in questions:
+        if not isinstance(question, dict):
+            continue
+        competency = str(question.get("competency", "")).strip()
+        if not competency:
+            continue
+
+        signal = raw.setdefault(
+            competency,
+            {
+                "question_count": 0,
+                "answered_count": 0,
+                "score_total": 0.0,
+                "low_score_count": 0,
+                "metric_count": 0,
+                "action_count": 0,
+                "word_total": 0,
+                "first_score": None,
+                "last_score": None,
+            },
+        )
+
+        score = _safe_score(question.get("score"))
+        signal["question_count"] += 1
+        signal["score_total"] += score
+        if signal["first_score"] is None:
+            signal["first_score"] = score
+        signal["last_score"] = score
+        if score < 60.0:
+            signal["low_score_count"] += 1
+
+        response_text = str(question.get("response", "")).strip()
+        if not response_text:
+            continue
+
+        signal["answered_count"] += 1
+        words = [part for part in response_text.split() if part]
+        signal["word_total"] += len(words)
+        if _has_metric_signal(response_text):
+            signal["metric_count"] += 1
+        if _has_action_signal(response_text):
+            signal["action_count"] += 1
+
+    normalized: dict[str, dict[str, float]] = {}
+    for competency, signal in raw.items():
+        question_count = max(1, int(signal["question_count"]))
+        answered_count = int(signal["answered_count"])
+        avg_words = float(signal["word_total"]) / answered_count if answered_count > 0 else 0.0
+        metric_ratio = float(signal["metric_count"]) / answered_count if answered_count > 0 else 0.0
+        action_ratio = float(signal["action_count"]) / answered_count if answered_count > 0 else 0.0
+        low_score_ratio = float(signal["low_score_count"]) / question_count
+        trend_delta = 0.0
+        if signal["first_score"] is not None and signal["last_score"] is not None:
+            trend_delta = float(signal["last_score"]) - float(signal["first_score"])
+
+        normalized[competency] = {
+            "question_count": float(question_count),
+            "answered_count": float(answered_count),
+            "avg_words": round(avg_words, 2),
+            "metric_ratio": round(metric_ratio, 3),
+            "action_ratio": round(action_ratio, 3),
+            "low_score_ratio": round(low_score_ratio, 3),
+            "trend_delta": round(trend_delta, 2),
+        }
+
+    return normalized
+
+
+def _feedback_gap_risk_score(*, score: float, signals: dict[str, float]) -> float:
+    adjusted_score = _safe_score(score)
+    answered_count = int(signals.get("answered_count", 0))
+    metric_ratio = float(signals.get("metric_ratio", 0.0))
+    action_ratio = float(signals.get("action_ratio", 0.0))
+    avg_words = float(signals.get("avg_words", 0.0))
+    low_score_ratio = float(signals.get("low_score_ratio", 0.0))
+    trend_delta = float(signals.get("trend_delta", 0.0))
+
+    if answered_count <= 0:
+        adjusted_score = min(adjusted_score, 45.0)
+    else:
+        if metric_ratio < 0.34:
+            adjusted_score -= 6.0
+        if action_ratio < 0.5:
+            adjusted_score -= 4.0
+        if avg_words < 16.0:
+            adjusted_score -= 7.0
+        if low_score_ratio >= 0.5:
+            adjusted_score -= 6.0
+        if trend_delta <= -10.0:
+            adjusted_score -= 4.0
+
+    return round(max(0.0, min(100.0, adjusted_score)), 2)
+
+
+def _has_metric_signal(value: str) -> bool:
+    return bool(re.search(r"\b\d+(\.\d+)?%?\b", value))
+
+
+def _has_action_signal(value: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(led|built|implemented|optimized|reduced|improved|shipped|designed|coordinated|resolved)\b",
+            value,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _feedback_action_plan(top_gaps: list[dict[str, str]]) -> list[dict[str, Any]]:
+    focus_areas = [
+        str(item.get("gap", "")).strip().lower()
+        for item in top_gaps
+        if isinstance(item, dict) and str(item.get("gap", "")).strip()
+    ]
+    if not focus_areas:
+        focus_areas = ["overall interview performance"]
+
+    action_plan: list[dict[str, Any]] = []
+    for day in range(1, 31):
+        focus = focus_areas[(day - 1) % len(focus_areas)]
+        if day <= 7:
+            phase = "foundation"
+            task = f"Draft one STAR outline for {focus} with a clear baseline and target metric."
+            success_metric = "Includes Situation, Task, Action, and a quantified Result in <= 6 bullet points."
+        elif day <= 14:
+            phase = "depth"
+            task = f"Record a 2-minute answer for {focus} and revise weak transitions or missing ownership."
+            success_metric = "Delivers a coherent 2-minute answer with explicit ownership and one metric."
+        elif day <= 21:
+            phase = "simulation"
+            task = f"Run a timed mock question on {focus} and add one follow-up-ready detail."
+            success_metric = "Mock score improves by at least 5 points versus previous {focus} attempt."
+        else:
+            phase = "stabilization"
+            task = f"Run mixed competency rehearsal while prioritizing {focus} under time pressure."
+            success_metric = "Maintains >= 70 score quality for {focus} across two consecutive rehearsals."
+
+        action_plan.append(
+            {
+                "day": day,
+                "task": f"[{phase}] {task}",
+                "success_metric": success_metric,
+            }
+        )
+
+    return action_plan
+
+
+def _feedback_answer_rewrites(*, session: dict[str, Any], top_gaps: list[dict[str, str]]) -> list[str]:
+    focus_areas = [
+        str(item.get("gap", "")).strip()
+        for item in top_gaps
+        if isinstance(item, dict) and str(item.get("gap", "")).strip()
+    ]
+    if not focus_areas:
+        focus_areas = ["Overall Interview Performance"]
+
+    candidates = _feedback_low_response_candidates(session=session, limit=3)
+    rewrites: list[str] = []
+
+    for idx, candidate in enumerate(candidates):
+        focus = focus_areas[idx % len(focus_areas)]
+        rewrites.append(
+            (
+                f"Rewrite {candidate['question_id']} for {focus}: "
+                "Situation: summarize context in one sentence. "
+                "Task: state your ownership and target. "
+                "Action: describe 2 concrete steps you led. "
+                "Result: include at least one metric and business impact."
+            )
+        )
+
+    if rewrites:
+        return rewrites
+
+    for focus in focus_areas[:3]:
+        rewrites.append(
+            (
+                f"Rewrite for {focus}: Situation: define context. Task: clarify your role. "
+                "Action: describe concrete decisions and tradeoffs. Result: quantify the outcome."
+            )
+        )
+    return rewrites
+
+
+def _feedback_low_response_candidates(*, session: dict[str, Any], limit: int) -> list[dict[str, Any]]:
+    questions = session.get("questions")
+    if not isinstance(questions, list):
+        return []
+
+    candidates: list[dict[str, Any]] = []
+    for question in questions:
+        if not isinstance(question, dict):
+            continue
+        response_text = str(question.get("response", "")).strip()
+        if not response_text:
+            continue
+        question_id = str(question.get("question_id", "question")).strip() or "question"
+        score = _safe_score(question.get("score"))
+        candidates.append(
+            {
+                "question_id": question_id,
+                "response": response_text,
+                "score": score,
+            }
+        )
+
+    candidates.sort(key=lambda item: (float(item["score"]), str(item["question_id"])))
+    return candidates[: max(0, int(limit))]
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
 def _request_id(environ: dict[str, Any]) -> str:
     header_value = str(environ.get("HTTP_X_REQUEST_ID", "")).strip()
     return header_value or f"req_{uuid4().hex}"
 
 
 def _meta(request_id: str) -> dict[str, str]:
-    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     return {
         "request_id": request_id,
-        "timestamp": timestamp,
+        "timestamp": _utc_timestamp(),
     }
 
 

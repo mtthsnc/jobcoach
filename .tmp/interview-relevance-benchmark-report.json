@@ -1,0 +1,108 @@
+{
+  "generated_at": "2026-02-28T22:25:38Z",
+  "fixtures_dir": "tests/unit/fixtures/interview_relevance",
+  "thresholds": {
+    "opening_coverage": 0.9,
+    "followup_competency_alignment": 0.9,
+    "followup_reason_alignment": 0.9,
+    "non_repetition_rate": 0.8,
+    "difficulty_bound_rate": 1.0,
+    "overall_relevance": 0.9
+  },
+  "aggregate": {
+    "opening_coverage": 1.0,
+    "opening_order_alignment": 1.0,
+    "followup_competency_alignment": 1.0,
+    "followup_reason_alignment": 1.0,
+    "non_repetition_rate": 1.0,
+    "difficulty_bound_rate": 1.0,
+    "overall_relevance": 1.0
+  },
+  "failed_thresholds": [],
+  "passed": true,
+  "cases": [
+    {
+      "case_id": "interview_gap_followup",
+      "expected_opening_competencies": [
+        "skill.sql",
+        "skill.python",
+        "skill.communication"
+      ],
+      "predicted_opening_competencies": [
+        "skill.sql",
+        "skill.python",
+        "skill.communication"
+      ],
+      "opening_coverage": 1.0,
+      "opening_order_alignment": 1.0,
+      "followup_expected_competency": "skill.sql",
+      "followup_selected_competency": "skill.sql",
+      "followup_competency_match": true,
+      "followup_expected_reasons": [
+        "coverage_gap"
+      ],
+      "followup_selected_reason": "coverage_gap",
+      "followup_reason_match": true,
+      "expect_non_repeat": true,
+      "followup_non_repetition_pass": true,
+      "followup_difficulty": 3,
+      "followup_difficulty_bound_pass": true,
+      "followup_confidence": 0.884,
+      "case_relevance_score": 1.0
+    },
+    {
+      "case_id": "interview_low_score_remediation",
+      "expected_opening_competencies": [
+        "skill.leadership",
+        "skill.communication",
+        "skill.execution"
+      ],
+      "predicted_opening_competencies": [
+        "skill.leadership",
+        "skill.communication",
+        "skill.execution"
+      ],
+      "opening_coverage": 1.0,
+      "opening_order_alignment": 1.0,
+      "followup_expected_competency": "skill.leadership",
+      "followup_selected_competency": "skill.leadership",
+      "followup_competency_match": true,
+      "followup_expected_reasons": [
+        "low_score_remediation"
+      ],
+      "followup_selected_reason": "low_score_remediation",
+      "followup_reason_match": true,
+      "expect_non_repeat": false,
+      "followup_non_repetition_pass": true,
+      "followup_difficulty": 3,
+      "followup_difficulty_bound_pass": true,
+      "followup_confidence": 0.769,
+      "case_relevance_score": 1.0
+    },
+    {
+      "case_id": "interview_single_competency_stabilize",
+      "expected_opening_competencies": [
+        "skill.system_design"
+      ],
+      "predicted_opening_competencies": [
+        "skill.system_design"
+      ],
+      "opening_coverage": 1.0,
+      "opening_order_alignment": 1.0,
+      "followup_expected_competency": "skill.system_design",
+      "followup_selected_competency": "skill.system_design",
+      "followup_competency_match": true,
+      "followup_expected_reasons": [
+        "stabilize_signal"
+      ],
+      "followup_selected_reason": "stabilize_signal",
+      "followup_reason_match": true,
+      "expect_non_repeat": false,
+      "followup_non_repetition_pass": true,
+      "followup_difficulty": 3,
+      "followup_difficulty_bound_pass": true,
+      "followup_confidence": 0.806,
+      "case_relevance_score": 1.0
+    }
+  ]
+}

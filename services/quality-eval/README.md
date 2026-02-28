@@ -1,5 +1,5 @@
 # services/quality-eval
 
-Purpose: placeholder component directory for JobCoach infrastructure build.
+Purpose: quality gates for schema validation and deterministic benchmark scoring.
 Owner: TBD
-Status: scaffolded in M0-001.
+Status: active with schema validator, extraction benchmark threshold runner, candidate parse benchmark threshold runner, interview relevance benchmark threshold runner, and feedback quality benchmark threshold runner.

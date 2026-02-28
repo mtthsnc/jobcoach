@@ -5,10 +5,10 @@ import math
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Mapping
 
-ROOT_DIR = Path(__file__).resolve().parents[3]
-DEFAULT_SCHEMA_PATH = ROOT_DIR / "docs" / "artifacts" / "core-schemas.json"
+from packages.contracts.artifacts import CORE_SCHEMAS_PATH
+from typing import Any, Mapping
+DEFAULT_SCHEMA_PATH = CORE_SCHEMAS_PATH
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,7 @@ class ValidationResult:
 
 
 class CoreSchemaValidator:
-    """Dependency-free validator for entities defined in docs/artifacts/core-schemas.json."""
+    """Dependency-free validator for entities defined in schemas/jsonschema/core-schemas.json."""
 
     def __init__(self, schema_document: Mapping[str, Any]) -> None:
         definitions = schema_document.get("definitions")

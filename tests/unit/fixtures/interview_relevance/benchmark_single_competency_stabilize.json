@@ -1,0 +1,27 @@
+{
+  "case_id": "interview_single_competency_stabilize",
+  "session_id": "sess_interview_single_competency_stabilize",
+  "job_spec": {
+    "competency_weights": {
+      "skill.system_design": 1.0
+    }
+  },
+  "candidate_profile": {
+    "skills": {
+      "system_design": 0.95
+    }
+  },
+  "expected_opening_competencies": [
+    "skill.system_design"
+  ],
+  "followup_context": {
+    "last_question_index": 0,
+    "scores": {
+      "skill.system_design": 84.0
+    },
+    "last_score": 84.0,
+    "expected_followup_competency": "skill.system_design",
+    "expected_reasons": ["stabilize_signal"],
+    "expect_non_repeat": false
+  }
+}

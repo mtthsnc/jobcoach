@@ -65,6 +65,24 @@
 - Storybank quality flags available for weak evidence.
 - Story coverage against target competencies reported.
 
+## M3: Adaptive Interview Engine
+
+### Deliverables
+
+- Interview session API lifecycle: create session, append candidate response, retrieve session state.
+- Deterministic question planner seeded by `JobSpec` competency weights and candidate storybank coverage.
+- Adaptive follow-up selector that responds to prior turn score, competency risk, and difficulty progression.
+- Persisted, schema-valid `InterviewSession` snapshots with turn history, per-question scores, and overall score.
+- Quality benchmark suite for interview relevance/coverage with threshold gating in CI.
+
+### Acceptance criteria
+
+- Interview session create/respond/get contract tests pass against OpenAPI and core schema constraints.
+- Adaptive planner demonstrates competency coverage and non-repetition behavior on fixture corpus.
+- >= 95% generated session snapshots validate as `InterviewSession`.
+- Benchmark relevance score meets or exceeds M3 gate threshold (>= 0.80).
+- Low-confidence adaptive outputs are explicitly flagged for reviewer override.
+
 ## 4. Suggested Sprint Breakdown
 
 - Sprint 1: M0 contracts + migrations + test scaffolding.
@@ -72,8 +90,11 @@
 - Sprint 3: M1 normalization + quality checks + review path.
 - Sprint 4: M2 parser + profile persistence.
 - Sprint 5: M2 storybank generator + quality/eval hardening.
+- Sprint 6: M3 contracts + session persistence + deterministic planner base.
+- Sprint 7: M3 adaptive follow-up logic + orchestration endpoint hardening.
+- Sprint 8: M3 benchmark thresholds + reviewer override path.
 
-## 5. Service Boundaries (M0-M2)
+## 5. Service Boundaries (M0-M3)
 
 - `api-gateway`: auth, validation, idempotency.
 - `orchestrator`: workflow state transitions.
@@ -81,6 +102,7 @@
 - `candidate-profile-service`: CV parsing and storybank generation.
 - `taxonomy-service`: canonical term mapping.
 - `quality-eval-service`: schema and benchmark validation.
+- `interview-engine-service`: question planning, follow-up adaptation, and session scoring state transitions.
 
 ## 6. Non-Functional Requirements
 
@@ -94,6 +116,7 @@
 - Contract tests for all API shapes.
 - Migration tests for apply + rollback.
 - Benchmark suites for extraction/parsing quality.
+- Interview simulation tests for turn sequencing, adaptation rules, and score progression.
 - Workflow tests for retries and failure modes.
 
 ## 8. Release Strategy

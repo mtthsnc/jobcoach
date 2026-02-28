@@ -9,6 +9,11 @@
       "competency": "incident_response",
       "difficulty": 3,
       "response": "I coordinated triage and rollback.",
+      "planner_metadata": {
+        "source_competency": "incident_response",
+        "ranking_position": 1,
+        "deterministic_confidence": 0.84
+      },
       "score": 82
     }
   ],

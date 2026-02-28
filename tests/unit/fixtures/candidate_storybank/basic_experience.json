@@ -1,0 +1,25 @@
+{
+  "case_id": "basic_experience",
+  "input": {
+    "candidate_id": "cand_story_001",
+    "experiences": [
+      {
+        "company": "Acme Corp",
+        "title": "Senior Backend Engineer",
+        "start_date": "2021-02-01",
+        "highlights": [
+          "Reduced API latency by 40% through caching and query optimization.",
+          "Led cross-functional incident response for critical outages."
+        ]
+      }
+    ],
+    "story_notes": [
+      "Improved deployment success rate to 98%."
+    ]
+  },
+  "expectations": {
+    "min_story_count": 1,
+    "required_competencies_any": ["execution", "problem_solving", "communication"],
+    "requires_metric": true
+  }
+}
