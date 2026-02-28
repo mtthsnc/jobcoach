@@ -227,12 +227,14 @@ Primary targets:
 - `make test`: unit tests + all benchmark threshold gates
 - `make validate-openapi`: OpenAPI structural validation
 - `make contract-test`: migration smoke + contract tests (+ API contract flow tests)
+- `make docker-test`: run validation gates inside Docker
 - `make migrate-up`: apply migrations
 - `make migrate-down`: up+down rollback verification
 - `make benchmark-extraction`
 - `make benchmark-candidate-parse`
 - `make benchmark-interview-relevance`
 - `make benchmark-feedback-quality`
+- `make benchmark-trajectory-quality`
 
 ## Quality Gates
 
@@ -287,6 +289,7 @@ make validate-openapi
 make migrate-up
 make migrate-down
 make contract-test
+make docker-test
 ```
 
 ## Documentation and Execution Runbook

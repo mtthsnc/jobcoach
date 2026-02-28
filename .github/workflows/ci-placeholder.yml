@@ -42,3 +42,6 @@ jobs:
 
       - name: Run contract target via Makefile
         run: make contract-test
+
+      - name: Run dockerized validation cycle
+        run: make docker-test
