@@ -1,0 +1,17 @@
+{
+  "job_spec_id": "job-001",
+  "source": {
+    "type": "url",
+    "value": "https://example.com/jobs/1",
+    "captured_at": "2026-02-20T10:30:00Z"
+  },
+  "responsibilities": ["Build backend services"],
+  "requirements": {
+    "required_skills": ["Python"],
+    "preferred_skills": []
+  },
+  "competency_weights": {
+    "technical_depth": 0.8
+  },
+  "extraction_confidence": 0.92
+}

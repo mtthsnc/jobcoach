@@ -1,0 +1,29 @@
+name: Placeholder CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-test-contract:
+    runs-on: ubuntu-latest
+    env:
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      PYTHONHASHSEED: "0"
+      MIGRATE_DB_PATH: .tmp/ci-migrate.sqlite3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run lint + unit tests
+        run: make lint test
+
+      - name: Run deterministic migration targets
+        run: make migrate-up migrate-down
+
+      - name: Validate OpenAPI contract via Makefile
+        run: make validate-openapi
+
+      - name: Run contract target via Makefile
+        run: make contract-test

@@ -1,0 +1,13 @@
+{
+  "trajectory_plan_id": "tp-001",
+  "candidate_id": "cand-001",
+  "target_role": "Senior Backend Engineer",
+  "milestones": [
+    {
+      "name": "Lead architecture review",
+      "target_date": "2026-06-30",
+      "metric": "Run 2 successful review sessions"
+    }
+  ],
+  "generated_at": "2026-02-20T12:30:00+00:00"
+}

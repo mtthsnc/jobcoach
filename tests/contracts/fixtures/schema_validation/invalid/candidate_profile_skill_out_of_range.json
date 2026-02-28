@@ -1,0 +1,28 @@
+{
+  "candidate_id": "cand-001",
+  "summary": "Backend engineer with API and data platform experience.",
+  "experience": [
+    {
+      "company": "Acme",
+      "title": "Software Engineer",
+      "start_date": "2022-01-10",
+      "highlights": ["Led migration"]
+    }
+  ],
+  "skills": {
+    "python": 1.2
+  },
+  "parse_confidence": 0.84,
+  "version": 1,
+  "storybank": [
+    {
+      "story_id": "story-1",
+      "situation": "Legacy system was unstable.",
+      "task": "Improve reliability.",
+      "action": "Introduced queue-based retries.",
+      "result": "Reduced incidents by 40%.",
+      "competencies": ["ownership"],
+      "evidence_quality": 0.85
+    }
+  ]
+}

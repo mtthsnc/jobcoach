@@ -1,0 +1,20 @@
+{
+  "session_id": "sess-001",
+  "job_spec_id": "job-001",
+  "candidate_id": "cand-001",
+  "questions": [
+    {
+      "question_id": "q-1",
+      "text": "Tell me about a time you resolved a production issue.",
+      "competency": "incident_response",
+      "difficulty": 6,
+      "response": "I coordinated triage and rollback.",
+      "score": 82
+    }
+  ],
+  "scores": {
+    "incident_response": 82
+  },
+  "overall_score": 79,
+  "created_at": "2026-02-20T11:45:00+00:00"
+}

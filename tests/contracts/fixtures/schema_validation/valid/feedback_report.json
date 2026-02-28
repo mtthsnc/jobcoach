@@ -1,0 +1,20 @@
+{
+  "feedback_report_id": "fb-001",
+  "session_id": "sess-001",
+  "top_gaps": [
+    {
+      "gap": "Quantifying impact",
+      "severity": "high",
+      "root_cause": "Answers lacked metrics",
+      "evidence": "No measurable outcomes shared"
+    }
+  ],
+  "action_plan": [
+    {
+      "day": 1,
+      "task": "Rewrite two STAR stories with metrics",
+      "success_metric": "Each includes baseline and result"
+    }
+  ],
+  "generated_at": "2026-02-20T12:00:00Z"
+}

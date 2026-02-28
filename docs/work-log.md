@@ -1,0 +1,203 @@
+# Work Log
+
+Use UTC timestamps. Append entries only.
+
+## Entry Format
+
+- `START` | `END`
+- Timestamp (UTC)
+- Session objective
+- Task ID(s)
+- Changes made
+- Validation evidence
+- Blockers / risks
+- Next pointer
+
+---
+
+- START
+- 2026-02-28T11:55:00Z
+- Create persistent documentation system for autonomous multi-session execution.
+- Task IDs: planning bootstrap (pre-M0 execution)
+- Changes made:
+  - Began documentation architecture and continuity framework.
+- Validation evidence:
+  - N/A at start.
+- Blockers / risks:
+  - Repository had no pre-existing structure.
+- Next pointer:
+  - Build core docs and continuity protocol.
+
+- END
+- 2026-02-28T12:08:53Z
+- Create persistent documentation system for autonomous multi-session execution.
+- Task IDs: planning bootstrap (pre-M0 execution)
+- Changes made:
+  - Added `docs/README.md`, `docs/masterplan.md`, `docs/implementation-plan.md`.
+  - Added `docs/tasklist.md`, `docs/NEXT_ACTION.md`, `docs/session-continuity.md`.
+  - Added `docs/decision-log.md`, `docs/risk-register.md`, templates, and artifacts.
+  - Added `docs/artifacts/openapi-m0-m2.yaml` and `docs/artifacts/core-schemas.json`.
+- Validation evidence:
+  - Verified file set with `find docs -maxdepth 3 -type f | sort`.
+  - Verified document sizes with `wc -l docs/*.md docs/templates/*.md docs/artifacts/*`.
+- Blockers / risks:
+  - Code scaffolding has not started yet; next work begins with `M0-001`.
+- Next pointer:
+  - Execute `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T12:11:48Z
+- Execute M0-001 infrastructure scaffolding.
+- Task IDs: M0-001
+- Changes made:
+  - Starting scaffolding execution.
+- Validation evidence:
+  - Pending.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Create directory skeleton and Makefile.
+
+- END
+- 2026-02-28T12:12:27Z
+- Execute M0-001 infrastructure scaffolding.
+- Task IDs: M0-001
+- Changes made:
+  - Created infrastructure directories under `apps/`, `services/`, `infra/`, `tests/`.
+  - Added placeholder `README.md` files for each created component directory.
+  - Added root `Makefile` with targets: `help`, `lint`, `test`, `migrate-up`, `migrate-down`, `contract-test`.
+  - Updated `docs/tasklist.md` (`M0-001` marked `DONE`).
+  - Updated `docs/NEXT_ACTION.md` to `M0-002`.
+- Validation evidence:
+  - `find apps services infra tests -maxdepth 2 -type d | sort`
+  - `make help`
+- Blockers / risks:
+  - No blockers.
+- Next pointer:
+  - Execute `M0-002`.
+
+- START
+- 2026-02-28T12:13:00Z
+- Execute parallel infrastructure build for M0 completion and M1-001 API contract delivery.
+- Task IDs: M0-002, M0-003, M0-004, M0-005, M0-006, M1-001
+- Changes made:
+  - Started parallel worker execution for OpenAPI wiring, migrations, contract harness, schema validation, outbox, and API endpoints.
+- Validation evidence:
+  - Pending at session start.
+- Blockers / risks:
+  - Sandbox blocks local port binding for API contract tests; requires escalated command for full run.
+- Next pointer:
+  - Complete validation and update planning docs.
+
+- END
+- 2026-02-28T17:30:44Z
+- Execute parallel infrastructure build for M0 completion and M1-001 API contract delivery.
+- Task IDs: M0-002, M0-003, M0-004, M0-005, M0-006, M1-001
+- Changes made:
+  - Added runtime OpenAPI wiring and validator script (`apps/api-gateway/openapi/openapi.yaml`, `scripts/validate_openapi.sh`, `Makefile`).
+  - Added SQL migrations `001-004` and deterministic migration runner (`scripts/migrate_sqlite_smoke.sh`).
+  - Added dependency-free core schema validator and fixtures/tests.
+  - Added outbox interface (`services/orchestrator/outbox/sqlite_outbox.py`) and unit tests.
+  - Added API gateway implementation for `POST/GET /v1/job-ingestions` with idempotency handling and SQLite repository.
+  - Added API contract tests for job-ingestion endpoints and integrated server command into `make contract-test`.
+  - Added CI workflow scaffold to execute lint/test/migrations/OpenAPI/contract checks.
+  - Reconciled OpenAPI/core-schema/migration drift based on explorer audit.
+  - Updated task tracker and moved `NEXT_ACTION` to `M1-002`.
+- Validation evidence:
+  - `make lint`
+  - `make test`
+  - `make validate-openapi`
+  - `make migrate-up && make migrate-down`
+  - `make contract-test` (run with escalation to allow local port binding)
+- Blockers / risks:
+  - `make contract-test` requires elevated execution in this environment due sandbox socket restrictions.
+- Next pointer:
+  - Execute `M1-002` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T17:37:34Z
+- Create a fresh-context monorepo planning doc before execution.
+- Task IDs: planning support (pre-monorepo execution)
+- Changes made:
+  - Starting documentation for monorepo transition and resume protocol.
+- Validation evidence:
+  - Pending.
+- Blockers / risks:
+  - None.
+- Next pointer:
+  - Add monorepo fresh-context doc and link from docs hub.
+
+- END
+- 2026-02-28T17:38:14Z
+- Create a fresh-context monorepo planning doc before execution.
+- Task IDs: planning support (pre-monorepo execution)
+- Changes made:
+  - Added `docs/monorepo-fresh-context.md` with target structure, phased transition, resume protocol, and return-to-tasklist instructions.
+  - Linked the new doc from `docs/README.md`.
+- Validation evidence:
+  - Documentation files updated and discoverable in docs index.
+- Blockers / risks:
+  - None.
+- Next pointer:
+  - Continue from `docs/NEXT_ACTION.md` or switch pointer to monorepo phase when approved.
+
+- START
+- 2026-02-28T17:39:30Z
+- Switch NEXT_ACTION to monorepo transition before new session.
+- Task IDs: pointer update
+- Changes made:
+  - Began pointer switch to monorepo phase.
+- Validation evidence:
+  - Pending.
+- Blockers / risks:
+  - None.
+- Next pointer:
+  - Update `docs/NEXT_ACTION.md` and log completion.
+
+- END
+- 2026-02-28T17:39:30Z
+- Switch NEXT_ACTION to monorepo transition before new session.
+- Task IDs: pointer update
+- Changes made:
+  - Updated `docs/NEXT_ACTION.md` to `MONO-A` (Monorepo Phase A preparation).
+- Validation evidence:
+  - `docs/NEXT_ACTION.md` now points to monorepo transition flow.
+- Blockers / risks:
+  - None.
+- Next pointer:
+  - Start Phase A execution from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T17:55:03Z
+- Execute `MONO-A` preparation with no behavior changes.
+- Task IDs: MONO-A
+- Changes made:
+  - Session start for Monorepo Phase A execution.
+- Validation evidence:
+  - Planned: `make test`, `make validate-openapi`, `make migrate-up`, `make migrate-down`, `make contract-test`.
+- Blockers / risks:
+  - `make contract-test` may require escalation for local port binding in this environment.
+- Next pointer:
+  - Create destination directories and document freeze + path mapping table.
+
+- END
+- 2026-02-28T17:59:06Z
+- Execute `MONO-A` preparation with no behavior changes.
+- Task IDs: MONO-A
+- Changes made:
+  - Created Phase A destination directories: `packages/`, `schemas/openapi`, `schemas/jsonschema`, `tools/scripts`.
+  - Added placeholder `README.md` files in new destination directories.
+  - Added `docs/monorepo-phase-a-freeze.md` with artifact checksums, frozen path references, and old->new mapping table.
+  - Linked Phase A execution record from `docs/monorepo-fresh-context.md`.
+  - Updated `docs/tasklist.md` with monorepo transition tasks and marked `MONO-A` as `DONE`.
+  - Updated `docs/NEXT_ACTION.md` to point to `MONO-B`.
+- Validation evidence:
+  - `make test` (pass)
+  - `make validate-openapi` (pass)
+  - `make migrate-up` (pass)
+  - `make migrate-down` (pass)
+  - `make contract-test` (initial sandbox bind failure; pass with escalated run)
+- Blockers / risks:
+  - Local port binding remains restricted in sandbox; `make contract-test` requires escalation in this environment.
+- Next pointer:
+  - Execute `MONO-B` schema/tooling relocation with compatibility shims and unchanged behavior.
