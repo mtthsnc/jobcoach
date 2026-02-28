@@ -162,6 +162,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/StorybankResponse'
 
+  /candidates/{candidate_id}/progress-dashboard:
+    get:
+      summary: Get candidate progress dashboard
+      operationId: getCandidateProgressDashboard
+      parameters:
+        - $ref: '#/components/parameters/CandidateId'
+        - in: query
+          name: target_role
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Candidate progress dashboard
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateProgressDashboardResponse'
+
   /interview-sessions:
     post:
       summary: Create an interview session
@@ -656,6 +674,191 @@ components:
             next_cursor: { type: string, nullable: true }
         meta: { $ref: '#/components/schemas/Meta' }
         error: { type: 'null' }
+
+    CandidateProgressDashboardResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/CandidateProgressDashboard'
+        meta: { $ref: '#/components/schemas/Meta' }
+        error: { type: 'null' }
+
+    CandidateProgressDashboard:
+      type: object
+      required: [candidate_id, progress_summary, competency_trend_cards, readiness_signals, latest_trajectory_plan]
+      properties:
+        candidate_id: { type: string }
+        progress_summary:
+          type: object
+          properties:
+            history_counts:
+              type: object
+              properties:
+                interview_sessions:
+                  type: integer
+                  minimum: 0
+                feedback_reports:
+                  type: integer
+                  minimum: 0
+                snapshots:
+                  type: integer
+                  minimum: 0
+            baseline:
+              type: object
+              properties:
+                timestamp:
+                  type: string
+                  format: date-time
+                source_type:
+                  type: string
+                source_id:
+                  type: string
+                overall_score:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+            current:
+              type: object
+              properties:
+                timestamp:
+                  type: string
+                  format: date-time
+                source_type:
+                  type: string
+                source_id:
+                  type: string
+                overall_score:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+            delta:
+              type: object
+              properties:
+                overall_score:
+                  type: number
+                  minimum: -100
+                  maximum: 100
+            competency_trends:
+              type: array
+              items:
+                type: object
+                required:
+                  [competency, baseline_score, current_score, delta_score, observation_count]
+                properties:
+                  competency:
+                    type: string
+                  baseline_score:
+                    type: number
+                    minimum: 0
+                    maximum: 100
+                  current_score:
+                    type: number
+                    minimum: 0
+                    maximum: 100
+                  delta_score:
+                    type: number
+                    minimum: -100
+                    maximum: 100
+                  observation_count:
+                    type: integer
+                    minimum: 0
+            top_improving_competencies:
+              type: array
+              items:
+                type: string
+            top_risk_competencies:
+              type: array
+              items:
+                type: string
+        competency_trend_cards:
+          type: object
+          required: [top_improving, top_risk]
+          properties:
+            top_improving:
+              type: array
+              items:
+                $ref: '#/components/schemas/CompetencyTrendCard'
+            top_risk:
+              type: array
+              items:
+                $ref: '#/components/schemas/CompetencyTrendCard'
+        readiness_signals:
+          type: object
+          required: [snapshot_count, readiness_band, momentum]
+          properties:
+            snapshot_count:
+              type: integer
+              minimum: 0
+            readiness_band:
+              type: string
+              enum: [insufficient_data, at_risk, developing, strong]
+            momentum:
+              type: string
+              enum: [unknown, declining, stable, improving]
+            overall_score:
+              type: number
+              minimum: 0
+              maximum: 100
+            overall_delta_score:
+              type: number
+              minimum: -100
+              maximum: 100
+            trajectory_readiness_score:
+              type: number
+              minimum: 0
+              maximum: 100
+        latest_trajectory_plan:
+          type: object
+          required: [available]
+          properties:
+            available:
+              type: boolean
+            trajectory_plan_id:
+              type: string
+            target_role:
+              type: string
+            version:
+              type: integer
+              minimum: 1
+            supersedes_trajectory_plan_id:
+              type: string
+            generated_at:
+              type: string
+              format: date-time
+            role_readiness_score:
+              type: number
+              minimum: 0
+              maximum: 100
+            horizon_months:
+              type: integer
+              minimum: 1
+              maximum: 24
+
+    CompetencyTrendCard:
+      type: object
+      required:
+        [competency, baseline_score, current_score, delta_score, observation_count, trend_direction]
+      properties:
+        competency:
+          type: string
+        baseline_score:
+          type: number
+          minimum: 0
+          maximum: 100
+        current_score:
+          type: number
+          minimum: 0
+          maximum: 100
+        delta_score:
+          type: number
+          minimum: -100
+          maximum: 100
+        observation_count:
+          type: integer
+          minimum: 0
+        trend_direction:
+          type: string
+          enum: [improving, declining, flat]
 
     CreateInterviewSessionRequest:
       type: object

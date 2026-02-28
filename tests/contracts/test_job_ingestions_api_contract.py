@@ -1492,6 +1492,274 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(get_missing_status, 404, get_missing_body)
         self.assertEqual(get_missing_body.get("error", {}).get("code"), "not_found")
 
+    def test_get_candidate_progress_dashboard_contract(self) -> None:
+        candidate_source_id = f"cand_contract_dashboard_{uuid.uuid4().hex[:8]}"
+        candidate_create_status, candidate_create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/candidate-ingestions",
+            body={
+                "candidate_id": candidate_source_id,
+                "cv_text": (
+                    "Jordan Lane\n"
+                    "Senior Backend Engineer\n"
+                    "Built reliable API workflows with Python and SQL.\n"
+                ),
+                "target_roles": ["Senior Backend Engineer"],
+            },
+            headers={"Idempotency-Key": f"candidate-dashboard-{uuid.uuid4()}"},
+        )
+        self.assertEqual(candidate_create_status, 202, candidate_create_body)
+        candidate_ingestion_id = self._assert_ingestion_accepted_response(candidate_create_body)
+
+        candidate_get_status, candidate_get_body = self._wait_for_candidate_ingestion_status(candidate_ingestion_id)
+        self.assertEqual(candidate_get_status, 200, candidate_get_body)
+        candidate_result = candidate_get_body.get("data", {}).get("result", {})
+        candidate_id = candidate_result.get("entity_id") if isinstance(candidate_result, dict) else None
+        self.assertIsInstance(candidate_id, str)
+        self.assertTrue(candidate_id)
+        assert isinstance(candidate_id, str)
+
+        job_spec_id = self._create_job_spec_entity_for_interview()
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO interview_sessions (
+                        session_id,
+                        job_spec_id,
+                        candidate_id,
+                        mode,
+                        status,
+                        questions_json,
+                        scores_json,
+                        overall_score,
+                        root_cause_tags_json,
+                        version,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, 'mock_interview', 'completed', ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "sess_contract_dash_001",
+                        job_spec_id,
+                        candidate_id,
+                        "[]",
+                        '{"skill.communication":55.0,"skill.execution":60.0,"skill.python":70.0}',
+                        61.67,
+                        "[]",
+                        2,
+                        "2026-02-20T10:00:00Z",
+                        "2026-02-20T10:00:00Z",
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO interview_sessions (
+                        session_id,
+                        job_spec_id,
+                        candidate_id,
+                        mode,
+                        status,
+                        questions_json,
+                        scores_json,
+                        overall_score,
+                        root_cause_tags_json,
+                        version,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, 'mock_interview', 'completed', ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "sess_contract_dash_002",
+                        job_spec_id,
+                        candidate_id,
+                        "[]",
+                        '{"skill.communication":75.0,"skill.execution":58.0,"skill.python":82.0}',
+                        71.67,
+                        "[]",
+                        2,
+                        "2026-02-22T10:00:00Z",
+                        "2026-02-22T10:00:00Z",
+                    ),
+                )
+                feedback_payload = json.dumps(
+                    {
+                        "feedback_report_id": "fb_contract_dash_001",
+                        "session_id": "sess_contract_dash_002",
+                        "competency_scores": {
+                            "skill.communication": 78.0,
+                            "skill.execution": 52.0,
+                            "skill.python": 84.0,
+                        },
+                        "overall_score": 71.33,
+                        "top_gaps": [],
+                        "action_plan": [],
+                        "generated_at": "2026-02-24T10:00:00Z",
+                        "version": 1,
+                    },
+                    separators=(",", ":"),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO feedback_reports (
+                        feedback_report_id,
+                        session_id,
+                        idempotency_key,
+                        request_json,
+                        payload_json,
+                        created_at,
+                        updated_at,
+                        version,
+                        supersedes_feedback_report_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "fb_contract_dash_001",
+                        "sess_contract_dash_002",
+                        "feedback-contract-dash-001",
+                        "{}",
+                        feedback_payload,
+                        "2026-02-24T10:00:00Z",
+                        "2026-02-24T10:00:00Z",
+                        1,
+                        None,
+                    ),
+                )
+
+        first_plan_status, first_plan_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Senior Backend Engineer",
+            },
+            headers={"Idempotency-Key": f"dashboard-trajectory-initial-{uuid.uuid4()}"},
+        )
+        self.assertEqual(first_plan_status, 201, first_plan_body)
+        first_plan_id = first_plan_body.get("data", {}).get("trajectory_plan_id")
+        self.assertIsInstance(first_plan_id, str)
+        self.assertTrue(first_plan_id)
+        assert isinstance(first_plan_id, str)
+
+        second_plan_status, second_plan_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Senior Backend Engineer",
+                "regenerate": True,
+                "expected_version": 1,
+            },
+            headers={"Idempotency-Key": f"dashboard-trajectory-next-{uuid.uuid4()}"},
+        )
+        self.assertEqual(second_plan_status, 201, second_plan_body)
+        second_plan_id = second_plan_body.get("data", {}).get("trajectory_plan_id")
+        self.assertIsInstance(second_plan_id, str)
+        self.assertTrue(second_plan_id)
+        assert isinstance(second_plan_id, str)
+
+        encoded_target_role = parse.quote("Senior Backend Engineer")
+        dashboard_status, dashboard_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/candidates/{candidate_id}/progress-dashboard?target_role={encoded_target_role}",
+        )
+        self.assertEqual(dashboard_status, 200, dashboard_body)
+        dashboard_data = dashboard_body.get("data", {})
+        self.assertEqual(dashboard_data.get("candidate_id"), candidate_id)
+
+        second_dashboard_status, second_dashboard_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/candidates/{candidate_id}/progress-dashboard?target_role={encoded_target_role}",
+        )
+        self.assertEqual(second_dashboard_status, 200, second_dashboard_body)
+        self.assertEqual(second_dashboard_body.get("data"), dashboard_data)
+
+        top_improving = dashboard_data.get("competency_trend_cards", {}).get("top_improving", [])
+        self.assertEqual([entry.get("competency") for entry in top_improving], ["skill.communication", "skill.python"])
+
+        top_risk = dashboard_data.get("competency_trend_cards", {}).get("top_risk", [])
+        self.assertEqual(
+            [entry.get("competency") for entry in top_risk],
+            ["skill.execution", "skill.communication", "skill.python"],
+        )
+
+        readiness = dashboard_data.get("readiness_signals", {})
+        self.assertEqual(readiness.get("snapshot_count"), 3)
+        self.assertEqual(readiness.get("momentum"), "improving")
+        self.assertIn(readiness.get("readiness_band"), {"developing", "strong"})
+
+        latest_trajectory = dashboard_data.get("latest_trajectory_plan", {})
+        self.assertTrue(latest_trajectory.get("available"))
+        self.assertEqual(latest_trajectory.get("trajectory_plan_id"), second_plan_id)
+        self.assertEqual(latest_trajectory.get("version"), 2)
+        self.assertEqual(latest_trajectory.get("supersedes_trajectory_plan_id"), first_plan_id)
+        self.assertEqual(latest_trajectory.get("target_role"), "Senior Backend Engineer")
+
+    def test_candidate_progress_dashboard_empty_history_and_validation_contract(self) -> None:
+        candidate_source_id = f"cand_contract_dashboard_empty_{uuid.uuid4().hex[:8]}"
+        candidate_create_status, candidate_create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/candidate-ingestions",
+            body={
+                "candidate_id": candidate_source_id,
+                "cv_text": "Dashboard empty-history candidate profile.",
+                "target_roles": ["Backend Engineer"],
+            },
+            headers={"Idempotency-Key": f"candidate-dashboard-empty-{uuid.uuid4()}"},
+        )
+        self.assertEqual(candidate_create_status, 202, candidate_create_body)
+        candidate_ingestion_id = self._assert_ingestion_accepted_response(candidate_create_body)
+
+        candidate_get_status, candidate_get_body = self._wait_for_candidate_ingestion_status(candidate_ingestion_id)
+        self.assertEqual(candidate_get_status, 200, candidate_get_body)
+        candidate_result = candidate_get_body.get("data", {}).get("result", {})
+        candidate_id = candidate_result.get("entity_id") if isinstance(candidate_result, dict) else None
+        self.assertIsInstance(candidate_id, str)
+        self.assertTrue(candidate_id)
+        assert isinstance(candidate_id, str)
+
+        dashboard_status, dashboard_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/candidates/{candidate_id}/progress-dashboard",
+        )
+        self.assertEqual(dashboard_status, 200, dashboard_body)
+        dashboard_data = dashboard_body.get("data", {})
+        self.assertEqual(dashboard_data.get("candidate_id"), candidate_id)
+        self.assertEqual(dashboard_data.get("progress_summary", {}).get("history_counts", {}).get("snapshots"), 0)
+        self.assertEqual(dashboard_data.get("competency_trend_cards", {}).get("top_improving"), [])
+        self.assertEqual(dashboard_data.get("competency_trend_cards", {}).get("top_risk"), [])
+        self.assertEqual(dashboard_data.get("readiness_signals", {}).get("snapshot_count"), 0)
+        self.assertEqual(dashboard_data.get("readiness_signals", {}).get("readiness_band"), "insufficient_data")
+        self.assertEqual(dashboard_data.get("readiness_signals", {}).get("momentum"), "unknown")
+        self.assertFalse(dashboard_data.get("latest_trajectory_plan", {}).get("available"))
+
+        invalid_query_status, invalid_query_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/candidates/{candidate_id}/progress-dashboard?target_role=",
+        )
+        self.assertEqual(invalid_query_status, 400, invalid_query_body)
+        self.assertEqual(invalid_query_body.get("error", {}).get("code"), "invalid_request")
+
+        missing_status, missing_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/candidates/cand_contract_dashboard_missing_{uuid.uuid4().hex[:8]}/progress-dashboard",
+        )
+        self.assertEqual(missing_status, 404, missing_body)
+        self.assertEqual(missing_body.get("error", {}).get("code"), "not_found")
+
     def _create_interview_session_entity_for_feedback(self) -> str:
         job_spec_id = self._create_job_spec_entity_for_interview()
         candidate_id = self._create_candidate_entity_for_interview()

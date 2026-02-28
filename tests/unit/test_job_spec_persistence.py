@@ -1513,6 +1513,219 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertEqual(get_missing_status, 404, get_missing_body)
         self.assertEqual(get_missing_body["error"]["code"], "not_found")
 
+    def test_candidate_progress_dashboard_returns_deterministic_cards_and_latest_trajectory_context(self) -> None:
+        _, job_spec_id = self._create_job_spec()
+        _, candidate_id = self._create_candidate_profile()
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO interview_sessions (
+                        session_id,
+                        job_spec_id,
+                        candidate_id,
+                        mode,
+                        status,
+                        questions_json,
+                        scores_json,
+                        overall_score,
+                        root_cause_tags_json,
+                        version,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, 'mock_interview', 'completed', ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "sess_dash_seed_001",
+                        job_spec_id,
+                        candidate_id,
+                        "[]",
+                        '{"skill.communication":55.0,"skill.execution":60.0,"skill.python":70.0}',
+                        61.67,
+                        "[]",
+                        2,
+                        "2026-02-20T10:00:00Z",
+                        "2026-02-20T10:00:00Z",
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO interview_sessions (
+                        session_id,
+                        job_spec_id,
+                        candidate_id,
+                        mode,
+                        status,
+                        questions_json,
+                        scores_json,
+                        overall_score,
+                        root_cause_tags_json,
+                        version,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, 'mock_interview', 'completed', ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "sess_dash_seed_002",
+                        job_spec_id,
+                        candidate_id,
+                        "[]",
+                        '{"skill.communication":75.0,"skill.execution":58.0,"skill.python":82.0}',
+                        71.67,
+                        "[]",
+                        2,
+                        "2026-02-22T10:00:00Z",
+                        "2026-02-22T10:00:00Z",
+                    ),
+                )
+                feedback_payload = json.dumps(
+                    {
+                        "feedback_report_id": "fb_dash_seed_001",
+                        "session_id": "sess_dash_seed_002",
+                        "competency_scores": {
+                            "skill.communication": 78.0,
+                            "skill.execution": 52.0,
+                            "skill.python": 84.0,
+                        },
+                        "overall_score": 71.33,
+                        "top_gaps": [],
+                        "action_plan": [],
+                        "generated_at": "2026-02-24T10:00:00Z",
+                        "version": 1,
+                    },
+                    separators=(",", ":"),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO feedback_reports (
+                        feedback_report_id,
+                        session_id,
+                        idempotency_key,
+                        request_json,
+                        payload_json,
+                        created_at,
+                        updated_at,
+                        version,
+                        supersedes_feedback_report_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "fb_dash_seed_001",
+                        "sess_dash_seed_002",
+                        "feedback-dash-seed-001",
+                        "{}",
+                        feedback_payload,
+                        "2026-02-24T10:00:00Z",
+                        "2026-02-24T10:00:00Z",
+                        1,
+                        None,
+                    ),
+                )
+
+        first_plan_status, _, first_plan_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/trajectory-plans",
+            body={"candidate_id": candidate_id, "target_role": "Senior Backend Engineer"},
+            headers={"Idempotency-Key": "dashboard-trajectory-initial-001"},
+        )
+        self.assertEqual(first_plan_status, 201, first_plan_body)
+        first_plan_id = first_plan_body["data"]["trajectory_plan_id"]
+
+        second_plan_status, _, second_plan_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Senior Backend Engineer",
+                "regenerate": True,
+                "expected_version": 1,
+            },
+            headers={"Idempotency-Key": "dashboard-trajectory-next-001"},
+        )
+        self.assertEqual(second_plan_status, 201, second_plan_body)
+        second_plan_id = second_plan_body["data"]["trajectory_plan_id"]
+
+        first_dashboard_status, _, first_dashboard_body = _request(
+            self.app,
+            method="GET",
+            path=f"/v1/candidates/{candidate_id}/progress-dashboard?target_role=Senior%20Backend%20Engineer",
+        )
+        self.assertEqual(first_dashboard_status, 200, first_dashboard_body)
+        first_dashboard = first_dashboard_body["data"]
+        validation = self.validator.validate("CandidateProgressDashboard", first_dashboard)
+        self.assertTrue(validation.is_valid, f"CandidateProgressDashboard validation failed: {validation.issues}")
+
+        second_dashboard_status, _, second_dashboard_body = _request(
+            self.app,
+            method="GET",
+            path=f"/v1/candidates/{candidate_id}/progress-dashboard?target_role=Senior%20Backend%20Engineer",
+        )
+        self.assertEqual(second_dashboard_status, 200, second_dashboard_body)
+        self.assertEqual(second_dashboard_body["data"], first_dashboard)
+
+        top_improving = first_dashboard["competency_trend_cards"]["top_improving"]
+        self.assertEqual([entry["competency"] for entry in top_improving], ["skill.communication", "skill.python"])
+        self.assertEqual([entry["trend_direction"] for entry in top_improving], ["improving", "improving"])
+
+        top_risk = first_dashboard["competency_trend_cards"]["top_risk"]
+        self.assertEqual([entry["competency"] for entry in top_risk], ["skill.execution", "skill.communication", "skill.python"])
+
+        readiness = first_dashboard["readiness_signals"]
+        self.assertEqual(readiness.get("snapshot_count"), 3)
+        self.assertEqual(readiness.get("momentum"), "improving")
+        self.assertIn(readiness.get("readiness_band"), {"developing", "strong"})
+
+        latest_trajectory = first_dashboard["latest_trajectory_plan"]
+        self.assertTrue(latest_trajectory.get("available"))
+        self.assertEqual(latest_trajectory.get("trajectory_plan_id"), second_plan_id)
+        self.assertEqual(latest_trajectory.get("version"), 2)
+        self.assertEqual(latest_trajectory.get("supersedes_trajectory_plan_id"), first_plan_id)
+        self.assertEqual(latest_trajectory.get("target_role"), "Senior Backend Engineer")
+
+    def test_candidate_progress_dashboard_empty_history_and_query_validation(self) -> None:
+        _, candidate_id = self._create_candidate_profile()
+
+        dashboard_status, _, dashboard_body = _request(
+            self.app,
+            method="GET",
+            path=f"/v1/candidates/{candidate_id}/progress-dashboard",
+        )
+        self.assertEqual(dashboard_status, 200, dashboard_body)
+        dashboard = dashboard_body["data"]
+        validation = self.validator.validate("CandidateProgressDashboard", dashboard)
+        self.assertTrue(validation.is_valid, f"CandidateProgressDashboard validation failed: {validation.issues}")
+
+        self.assertEqual(dashboard.get("candidate_id"), candidate_id)
+        self.assertEqual(dashboard["progress_summary"].get("history_counts", {}).get("snapshots"), 0)
+        self.assertEqual(dashboard["competency_trend_cards"].get("top_improving"), [])
+        self.assertEqual(dashboard["competency_trend_cards"].get("top_risk"), [])
+        self.assertEqual(dashboard["readiness_signals"].get("snapshot_count"), 0)
+        self.assertEqual(dashboard["readiness_signals"].get("readiness_band"), "insufficient_data")
+        self.assertEqual(dashboard["readiness_signals"].get("momentum"), "unknown")
+        self.assertFalse(dashboard["latest_trajectory_plan"].get("available"))
+
+        invalid_query_status, _, invalid_query_body = _request(
+            self.app,
+            method="GET",
+            path=f"/v1/candidates/{candidate_id}/progress-dashboard?target_role=",
+        )
+        self.assertEqual(invalid_query_status, 400, invalid_query_body)
+        self.assertEqual(invalid_query_body["error"]["code"], "invalid_request")
+
+        missing_status, _, missing_body = _request(
+            self.app,
+            method="GET",
+            path="/v1/candidates/cand_missing_dashboard_unit_001/progress-dashboard",
+        )
+        self.assertEqual(missing_status, 404, missing_body)
+        self.assertEqual(missing_body["error"]["code"], "not_found")
+
     def test_post_and_get_candidate_ingestion_persists_row(self) -> None:
         payload = {
             "candidate_id": "cand_unit_001",

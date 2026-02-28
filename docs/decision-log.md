@@ -96,3 +96,15 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Keep single trajectory row per candidate/role and overwrite payload in place.
   - Depend only on idempotency-key replay without explicit version progression or optimistic conflict checks.
+
+- Decision ID: `DEC-008`
+- Date (UTC): `2026-02-28`
+- Status: `accepted`
+- Context: The candidate dashboard needed a stable read model that combines longitudinal progress with the latest trajectory generation context without forcing clients to reconcile multiple APIs.
+- Decision: Add `GET /candidates/{candidate_id}/progress-dashboard` with deterministic top-improving/top-risk competency cards, readiness signals, and latest trajectory metadata (including `version` and supersedes linkage), optionally scoped by `target_role`.
+- Consequences:
+  - Dashboard consumers receive deterministic ordering and version-safe trajectory context in a single response.
+  - Contract and core schema surface area increased for dashboard-specific payload objects.
+- Alternatives considered:
+  - Compute dashboard cards client-side from `TrajectoryPlan.progress_summary`.
+  - Expose only progress summary and omit trajectory metadata from dashboard responses.

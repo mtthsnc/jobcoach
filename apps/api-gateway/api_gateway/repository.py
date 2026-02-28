@@ -745,6 +745,38 @@ class SQLiteJobIngestionRepository:
 
         return _row_to_trajectory_plan(row) if row is not None else None
 
+    def get_latest_trajectory_plan_for_candidate(
+        self,
+        *,
+        candidate_id: str,
+        target_role: str | None = None,
+    ) -> dict[str, Any] | None:
+        with closing(self._connect()) as connection:
+            if isinstance(target_role, str) and target_role.strip():
+                row = connection.execute(
+                    """
+                    SELECT payload_json, version, supersedes_trajectory_plan_id
+                    FROM trajectory_plans
+                    WHERE candidate_id = ? AND target_role = ?
+                    ORDER BY version DESC, created_at DESC, trajectory_plan_id DESC
+                    LIMIT 1
+                    """,
+                    (candidate_id, target_role.strip()),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    """
+                    SELECT payload_json, version, supersedes_trajectory_plan_id
+                    FROM trajectory_plans
+                    WHERE candidate_id = ?
+                    ORDER BY created_at DESC, target_role ASC, version DESC, trajectory_plan_id DESC
+                    LIMIT 1
+                    """,
+                    (candidate_id,),
+                ).fetchone()
+
+        return _row_to_trajectory_plan(row) if row is not None else None
+
     def list_interview_sessions_for_candidate(self, *, candidate_id: str) -> list[dict[str, Any]]:
         with closing(self._connect()) as connection:
             rows = connection.execute(

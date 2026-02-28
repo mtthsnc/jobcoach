@@ -35,6 +35,7 @@ JOB_SPEC_REVIEW_ROUTE_SUFFIX = "/review"
 CANDIDATE_ROUTE_PREFIX = "/v1/candidates/"
 CANDIDATE_PROFILE_SUFFIX = "/profile"
 CANDIDATE_STORYBANK_SUFFIX = "/storybank"
+CANDIDATE_PROGRESS_DASHBOARD_SUFFIX = "/progress-dashboard"
 FOLLOWUP_OVERRIDE_CONFIDENCE_THRESHOLD = 0.80
 IMMUTABLE_JOB_SPEC_PATCH_FIELDS = {"job_spec_id", "source", "version"}
 MUTABLE_JOB_SPEC_PATCH_FIELDS = {
@@ -317,6 +318,30 @@ class JobIngestionAPI:
                     headers=[("Allow", "GET")],
                 )
             return self._handle_get_candidate_storybank(
+                environ,
+                start_response,
+                request_id=request_id,
+                candidate_id=candidate_id,
+            )
+
+        if path.startswith(CANDIDATE_ROUTE_PREFIX) and path.endswith(CANDIDATE_PROGRESS_DASHBOARD_SUFFIX):
+            candidate_id = unquote(path[len(CANDIDATE_ROUTE_PREFIX) : -len(CANDIDATE_PROGRESS_DASHBOARD_SUFFIX)])
+            if candidate_id.endswith("/"):
+                candidate_id = candidate_id[:-1]
+            if not candidate_id or "/" in candidate_id:
+                return _json_response(
+                    start_response,
+                    HTTPStatus.NOT_FOUND,
+                    _error_envelope(request_id=request_id, code="not_found", message="Resource not found", retryable=False),
+                )
+            if method != "GET":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "GET")],
+                )
+            return self._handle_get_candidate_progress_dashboard(
                 environ,
                 start_response,
                 request_id=request_id,
@@ -727,6 +752,78 @@ class JobIngestionAPI:
                     "next_cursor": next_cursor,
                 },
             ),
+        )
+
+    def _handle_get_candidate_progress_dashboard(
+        self,
+        environ: dict[str, Any],
+        start_response: Any,
+        *,
+        request_id: str,
+        candidate_id: str,
+    ) -> list[bytes]:
+        candidate_profile = self._repository.get_candidate_profile_by_id(candidate_id)
+        if candidate_profile is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Candidate profile not found",
+                    retryable=False,
+                ),
+            )
+
+        query, query_errors = _parse_candidate_progress_dashboard_query(environ)
+        if query_errors:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Query parameter validation failed",
+                    retryable=False,
+                    details=query_errors,
+                ),
+            )
+
+        interview_history = self._repository.list_interview_sessions_for_candidate(candidate_id=candidate_id)
+        feedback_history = self._repository.list_feedback_reports_for_candidate(candidate_id=candidate_id)
+        progress_summary = self._progress_aggregator.aggregate(
+            interview_sessions=interview_history,
+            feedback_reports=feedback_history,
+        )
+        latest_trajectory_plan = self._repository.get_latest_trajectory_plan_for_candidate(
+            candidate_id=candidate_id,
+            target_role=query["target_role"],
+        )
+        dashboard_payload = self._build_candidate_progress_dashboard_payload(
+            candidate_id=candidate_id,
+            progress_summary=progress_summary,
+            latest_trajectory_plan=latest_trajectory_plan,
+        )
+
+        validation = self._schema_validator.validate("CandidateProgressDashboard", dashboard_payload)
+        if not validation.is_valid:
+            issue_summary = [{"path": issue.path, "message": issue.message} for issue in validation.issues]
+            return _json_response(
+                start_response,
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_candidate_progress_dashboard",
+                    message="Generated candidate progress dashboard failed schema validation",
+                    retryable=False,
+                    details=issue_summary,
+                ),
+            )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.OK,
+            _success_envelope(request_id=request_id, data=dashboard_payload),
         )
 
     def _handle_create_interview_session(
@@ -1760,6 +1857,31 @@ class JobIngestionAPI:
             "generated_at": _utc_timestamp(),
         }
 
+    def _build_candidate_progress_dashboard_payload(
+        self,
+        *,
+        candidate_id: str,
+        progress_summary: dict[str, Any],
+        latest_trajectory_plan: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        summary = progress_summary if isinstance(progress_summary, dict) else {}
+        competency_trends = _normalize_progress_competency_trends(summary.get("competency_trends"))
+        latest_trajectory_metadata = _latest_trajectory_plan_dashboard_metadata(latest_trajectory_plan)
+
+        return {
+            "candidate_id": candidate_id,
+            "progress_summary": summary,
+            "competency_trend_cards": {
+                "top_improving": _build_top_improving_competency_cards(competency_trends),
+                "top_risk": _build_top_risk_competency_cards(competency_trends),
+            },
+            "readiness_signals": _build_dashboard_readiness_signals(
+                progress_summary=summary,
+                latest_trajectory_metadata=latest_trajectory_metadata,
+            ),
+            "latest_trajectory_plan": latest_trajectory_metadata,
+        }
+
 
 def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
     resolved_db_path = db_path or os.environ.get("JOBCOACH_DB_PATH") or ".tmp/migrate-local.sqlite3"
@@ -2049,6 +2171,21 @@ def _parse_storybank_query(environ: dict[str, Any]) -> tuple[dict[str, Any], lis
     }, errors
 
 
+def _parse_candidate_progress_dashboard_query(environ: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    query_string = str(environ.get("QUERY_STRING", ""))
+    query_map = parse_qs(query_string, keep_blank_values=True)
+    errors: list[dict[str, str]] = []
+
+    target_role: str | None = None
+    raw_target_role = _first_query_value(query_map, "target_role")
+    if raw_target_role is not None:
+        target_role = raw_target_role.strip()
+        if not target_role:
+            errors.append({"field": "target_role", "reason": "must be a non-empty string when provided"})
+
+    return {"target_role": target_role}, errors
+
+
 def _first_query_value(query_map: dict[str, list[str]], field: str) -> str | None:
     values = query_map.get(field)
     if not values:
@@ -2170,6 +2307,181 @@ def _candidate_status_payload(record: CandidateIngestionRecord) -> dict[str, Any
         payload["error"] = error_payload
 
     return payload
+
+
+def _normalize_progress_competency_trends(raw_trends: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_trends, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for raw_entry in raw_trends:
+        if not isinstance(raw_entry, dict):
+            continue
+        competency = str(raw_entry.get("competency", "")).strip()
+        if not competency:
+            continue
+
+        baseline_score = _coerce_dashboard_score(raw_entry.get("baseline_score"))
+        current_score = _coerce_dashboard_score(raw_entry.get("current_score"))
+        delta_score = _coerce_dashboard_delta(raw_entry.get("delta_score"))
+        if baseline_score is None or current_score is None or delta_score is None:
+            continue
+
+        observation_count = _coerce_dashboard_count(raw_entry.get("observation_count"))
+        normalized.append(
+            {
+                "competency": competency,
+                "baseline_score": baseline_score,
+                "current_score": current_score,
+                "delta_score": delta_score,
+                "observation_count": observation_count,
+                "trend_direction": _trend_direction_from_delta(delta_score),
+            }
+        )
+
+    return normalized
+
+
+def _build_top_improving_competency_cards(competency_trends: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    improving = [entry for entry in competency_trends if float(entry.get("delta_score", 0.0)) > 0.0]
+    improving.sort(key=lambda entry: (-float(entry["delta_score"]), str(entry["competency"])))
+    return improving[:3]
+
+
+def _build_top_risk_competency_cards(competency_trends: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ranked = sorted(
+        competency_trends,
+        key=lambda entry: (
+            float(entry["current_score"]),
+            float(entry["delta_score"]),
+            str(entry["competency"]),
+        ),
+    )
+    return ranked[:3]
+
+
+def _latest_trajectory_plan_dashboard_metadata(latest_trajectory_plan: dict[str, Any] | None) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"available": False}
+    if not isinstance(latest_trajectory_plan, dict):
+        return metadata
+
+    trajectory_plan_id = str(latest_trajectory_plan.get("trajectory_plan_id", "")).strip()
+    target_role = str(latest_trajectory_plan.get("target_role", "")).strip()
+    if not trajectory_plan_id or not target_role:
+        return metadata
+
+    metadata["available"] = True
+    metadata["trajectory_plan_id"] = trajectory_plan_id
+    metadata["target_role"] = target_role
+
+    raw_version = latest_trajectory_plan.get("version")
+    if isinstance(raw_version, int) and not isinstance(raw_version, bool) and raw_version >= 1:
+        metadata["version"] = raw_version
+
+    supersedes_id = latest_trajectory_plan.get("supersedes_trajectory_plan_id")
+    if isinstance(supersedes_id, str) and supersedes_id.strip():
+        metadata["supersedes_trajectory_plan_id"] = supersedes_id.strip()
+
+    generated_at = latest_trajectory_plan.get("generated_at")
+    if isinstance(generated_at, str) and generated_at.strip():
+        metadata["generated_at"] = generated_at.strip()
+
+    role_readiness_score = _coerce_dashboard_score(latest_trajectory_plan.get("role_readiness_score"))
+    if role_readiness_score is not None:
+        metadata["role_readiness_score"] = role_readiness_score
+
+    horizon_months = latest_trajectory_plan.get("horizon_months")
+    if isinstance(horizon_months, int) and not isinstance(horizon_months, bool) and 1 <= horizon_months <= 24:
+        metadata["horizon_months"] = horizon_months
+
+    return metadata
+
+
+def _build_dashboard_readiness_signals(
+    *,
+    progress_summary: dict[str, Any],
+    latest_trajectory_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    history_counts = progress_summary.get("history_counts")
+    snapshot_count = 0
+    if isinstance(history_counts, dict):
+        snapshot_count = _coerce_dashboard_count(history_counts.get("snapshots"))
+
+    current_score: float | None = None
+    current = progress_summary.get("current")
+    if isinstance(current, dict):
+        current_score = _coerce_dashboard_score(current.get("overall_score"))
+
+    overall_delta_score: float | None = None
+    delta = progress_summary.get("delta")
+    if isinstance(delta, dict):
+        overall_delta_score = _coerce_dashboard_delta(delta.get("overall_score"))
+
+    trajectory_readiness_score: float | None = None
+    if isinstance(latest_trajectory_metadata, dict):
+        trajectory_readiness_score = _coerce_dashboard_score(latest_trajectory_metadata.get("role_readiness_score"))
+
+    resolved_readiness_score = trajectory_readiness_score if trajectory_readiness_score is not None else current_score
+    readiness_signals: dict[str, Any] = {
+        "snapshot_count": snapshot_count,
+        "readiness_band": _readiness_band_for_score(resolved_readiness_score),
+        "momentum": _momentum_signal_from_delta(overall_delta_score),
+    }
+
+    if current_score is not None:
+        readiness_signals["overall_score"] = current_score
+    if overall_delta_score is not None:
+        readiness_signals["overall_delta_score"] = overall_delta_score
+    if trajectory_readiness_score is not None:
+        readiness_signals["trajectory_readiness_score"] = trajectory_readiness_score
+
+    return readiness_signals
+
+
+def _readiness_band_for_score(score: float | None) -> str:
+    if score is None:
+        return "insufficient_data"
+    if score >= 80.0:
+        return "strong"
+    if score >= 65.0:
+        return "developing"
+    return "at_risk"
+
+
+def _momentum_signal_from_delta(delta_score: float | None) -> str:
+    if delta_score is None:
+        return "unknown"
+    if delta_score >= 5.0:
+        return "improving"
+    if delta_score <= -5.0:
+        return "declining"
+    return "stable"
+
+
+def _trend_direction_from_delta(delta_score: float) -> str:
+    if delta_score > 0:
+        return "improving"
+    if delta_score < 0:
+        return "declining"
+    return "flat"
+
+
+def _coerce_dashboard_score(raw_value: Any) -> float | None:
+    if not isinstance(raw_value, (int, float)) or isinstance(raw_value, bool):
+        return None
+    return round(max(0.0, min(100.0, float(raw_value))), 2)
+
+
+def _coerce_dashboard_delta(raw_value: Any) -> float | None:
+    if not isinstance(raw_value, (int, float)) or isinstance(raw_value, bool):
+        return None
+    return round(max(-100.0, min(100.0, float(raw_value))), 2)
+
+
+def _coerce_dashboard_count(raw_value: Any) -> int:
+    if not isinstance(raw_value, int) or isinstance(raw_value, bool):
+        return 0
+    return max(0, raw_value)
 
 
 def _sections_by_id(sections: tuple[Any, ...]) -> dict[str, list[str]]:

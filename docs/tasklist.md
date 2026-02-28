@@ -49,13 +49,13 @@ Status legend: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`
 | M5-002 | DONE | P0 | M5 | Build deterministic longitudinal progress aggregator from interview sessions and feedback report history | M5-001 | Baseline/current/delta trend metrics are deterministic and regression-tested on fixed histories |
 | M5-003 | DONE | P0 | M5 | Implement trajectory milestone + weekly-plan generator from trend metrics and target-role competency gaps | M5-002 | Generated `TrajectoryPlan` milestones/weekly plan are schema-valid, date-ordered, and evidence-linked |
 | M5-004 | DONE | P1 | M5 | Persist/retrieve trajectory plans with idempotent generation semantics and optimistic version checks | M5-001,M5-003 | Storage supports idempotent replay, regeneration progression, and expected-version conflict behavior |
-| M5-005 | TODO | P1 | M5 | Add candidate progress dashboard endpoint with competency trend cards and readiness signals | M5-002,M5-004 | Dashboard returns stable trend math and surfaces top-improving/top-risk competencies |
+| M5-005 | DONE | P1 | M5 | Add candidate progress dashboard endpoint with competency trend cards and readiness signals | M5-002,M5-004 | Dashboard returns stable trend math and surfaces top-improving/top-risk competencies |
 | M5-006 | TODO | P0 | M5 | Add trajectory quality benchmark + threshold gates for CI/local | M5-005,M0-006 | Benchmark report emitted and CI fails on trend-metric/trajectory-quality regressions |
 
 ## NEXT
 
-- `NEXT-1`: Execute `M5-005` candidate progress dashboard with trend cards/readiness signals.
-- `NEXT-2`: Execute `M5-006` trajectory quality benchmark + threshold gates.
+- `NEXT-1`: Execute `M5-006` trajectory quality benchmark + threshold gates.
+- `NEXT-2`: After `M5-006`, advance to next milestone planning queue.
 
 ## Backlog (Future Milestones)
 

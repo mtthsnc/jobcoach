@@ -1447,3 +1447,54 @@ Use UTC timestamps. Append entries only.
   - No remaining blockers for `M5-004`.
 - Next pointer:
   - Execute `M5-005` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T23:13:05Z
+- Execute `M5-005` candidate progress dashboard endpoint and deterministic read model.
+- Task IDs: M5-005
+- Changes made:
+  - Added candidate progress dashboard endpoint in `apps/api-gateway/api_gateway/app.py`:
+    - routed `GET /v1/candidates/{candidate_id}/progress-dashboard`,
+    - added query parsing for optional `target_role`,
+    - assembled deterministic read model with competency trend cards, readiness signals, and latest trajectory metadata,
+    - validated dashboard payloads against new `CandidateProgressDashboard` schema.
+  - Extended repository in `apps/api-gateway/api_gateway/repository.py`:
+    - added `get_latest_trajectory_plan_for_candidate(candidate_id, target_role=None)` to load version-aware latest trajectory context.
+  - Updated contracts/schemas:
+    - `schemas/openapi/openapi-m0-m2.yaml`: added dashboard path + response schemas.
+    - `schemas/jsonschema/core-schemas.json`: added `CandidateProgressDashboard` definition for validator-backed schema checks.
+  - Added regression coverage:
+    - `tests/unit/test_job_spec_persistence.py` for deterministic card ordering, empty-history behavior, query validation, and latest trajectory version metadata.
+    - `tests/contracts/test_job_ingestions_api_contract.py` for end-to-end dashboard behavior and validation/not-found semantics.
+  - Logged decision `DEC-008` for dashboard read-model composition and trajectory version-context exposure.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `make validate-openapi`
+  - `make test`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make contract-test`
+- Blockers / risks:
+  - Running `make migrate-down` and `make contract-test` in parallel caused transient migration DB collisions on `.tmp/migrate-local.sqlite3`; rerunning sequentially produced green results.
+- Next pointer:
+  - Close `M5-005` in planning docs and advance pointer to `M5-006`.
+
+- END
+- 2026-02-28T23:23:33Z
+- Execute `M5-005` candidate progress dashboard endpoint and deterministic read model.
+- Task IDs: M5-005
+- Changes made:
+  - Marked `M5-005` as `DONE` in `docs/tasklist.md`.
+  - Updated `docs/tasklist.md` NEXT queue to prioritize `M5-006`.
+  - Updated `docs/NEXT_ACTION.md` active pointer to `M5-006` with benchmark/threshold implementation steps.
+- Validation evidence:
+  - `make test`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make contract-test`
+- Blockers / risks:
+  - No remaining blockers for `M5-005`.
+- Next pointer:
+  - Execute `M5-006` from `docs/NEXT_ACTION.md`.
