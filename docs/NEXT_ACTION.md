@@ -6,17 +6,17 @@
 
 ## Active Task
 
-- Task ID: `M5-003`
-- Task: Implement trajectory milestone + weekly-plan generator from trend metrics and target-role competency gaps.
-- Why now: `M5-002` deterministic progress aggregation is complete, so trajectory generation can now consume stable baseline/current/delta metrics.
+- Task ID: `M5-005`
+- Task: Add candidate progress dashboard endpoint with competency trend cards and readiness signals.
+- Why now: `M5-004` versioned trajectory persistence is complete, so dashboard reads can safely use stable trajectory generations plus longitudinal trend summaries.
 
 ## Exact Next Steps
 
-1. Replace static trajectory milestones and weekly actions with generator logic derived from aggregated trend metrics and competency deltas.
-2. Incorporate target-role gap emphasis so top-risk competencies influence milestone priority and weekly action sequencing.
-3. Enforce deterministic generation behavior (stable ordering, bounded horizon, repeatable outputs for fixed inputs).
-4. Add unit/contract tests asserting schema validity, date ordering, and evidence-linked action generation from fixed trend fixtures.
-5. Update planning docs to mark `M5-003` complete and move pointer to `M5-004`.
+1. Add dashboard endpoint contract + handler for candidate progress view composed from progress summaries and latest trajectory version.
+2. Build deterministic read-model assembly for top-improving/top-risk competencies, readiness signals, and recent trajectory metadata.
+3. Reuse trajectory version metadata (`version`, supersedes linkage) to expose latest-plan context safely.
+4. Add unit/contract tests for deterministic sorting, empty-history behavior, and schema-valid dashboard payloads.
+5. Update planning docs to mark `M5-005` complete and move pointer to `M5-006`.
 
 ## Validation Required
 
@@ -29,4 +29,4 @@
 
 ## Return Pointer
 
-After `M5-003` is complete, execute `M5-004`.
+After `M5-005` is complete, execute `M5-006`.

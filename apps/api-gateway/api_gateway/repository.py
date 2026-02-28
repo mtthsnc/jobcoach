@@ -84,6 +84,7 @@ class FeedbackReportCreateResult:
 class TrajectoryPlanCreateResult:
     status: str
     plan: dict[str, Any] | None
+    current_version: int | None
 
 
 class SQLiteJobIngestionRepository:
@@ -620,6 +621,10 @@ class SQLiteJobIngestionRepository:
             )
 
         request_json = _canonical_json(request_payload)
+        expected_version_raw = request_payload.get("expected_version")
+        expected_version: int | None = None
+        if isinstance(expected_version_raw, int) and not isinstance(expected_version_raw, bool):
+            expected_version = expected_version_raw
 
         with closing(self._connect()) as connection:
             with connection:
@@ -628,11 +633,11 @@ class SQLiteJobIngestionRepository:
                     (candidate_id,),
                 ).fetchone()
                 if candidate_row is None:
-                    return TrajectoryPlanCreateResult(status="candidate_not_found", plan=None)
+                    return TrajectoryPlanCreateResult(status="candidate_not_found", plan=None, current_version=None)
 
                 existing_row = connection.execute(
                     """
-                    SELECT request_json, payload_json
+                    SELECT request_json, payload_json, version, supersedes_trajectory_plan_id
                     FROM trajectory_plans
                     WHERE idempotency_key = ?
                     """,
@@ -640,12 +645,50 @@ class SQLiteJobIngestionRepository:
                 ).fetchone()
                 if existing_row is not None:
                     existing_request_json = str(existing_row["request_json"])
-                    existing_payload = _decode_json_object(str(existing_row["payload_json"]))
+                    existing_payload = _row_to_trajectory_plan(existing_row)
+                    existing_version_raw = existing_payload.get("version") if isinstance(existing_payload, dict) else None
+                    existing_version = int(existing_row["version"]) if isinstance(existing_row["version"], int) else None
+                    if existing_version is None and isinstance(existing_version_raw, int):
+                        existing_version = int(existing_version_raw)
                     if existing_request_json == request_json:
-                        return TrajectoryPlanCreateResult(status="idempotent_replay", plan=existing_payload)
-                    return TrajectoryPlanCreateResult(status="idempotency_conflict", plan=existing_payload)
+                        return TrajectoryPlanCreateResult(
+                            status="idempotent_replay",
+                            plan=existing_payload,
+                            current_version=existing_version,
+                        )
+                    return TrajectoryPlanCreateResult(
+                        status="idempotency_conflict",
+                        plan=existing_payload,
+                        current_version=existing_version,
+                    )
 
-                payload_json = _canonical_json(trajectory_plan)
+                latest_row = connection.execute(
+                    """
+                    SELECT trajectory_plan_id, payload_json, version, supersedes_trajectory_plan_id
+                    FROM trajectory_plans
+                    WHERE candidate_id = ? AND target_role = ?
+                    ORDER BY version DESC, created_at DESC, trajectory_plan_id DESC
+                    LIMIT 1
+                    """,
+                    (candidate_id, target_role),
+                ).fetchone()
+                current_version = int(latest_row["version"]) if latest_row is not None else 0
+                if expected_version is not None and expected_version != current_version:
+                    latest_payload = _row_to_trajectory_plan(latest_row) if latest_row is not None else None
+                    return TrajectoryPlanCreateResult(
+                        status="version_conflict",
+                        plan=latest_payload,
+                        current_version=current_version,
+                    )
+
+                plan_payload = json.loads(json.dumps(trajectory_plan))
+                next_version = current_version + 1
+                plan_payload["version"] = next_version
+                supersedes_trajectory_plan_id: str | None = None
+                if latest_row is not None:
+                    supersedes_trajectory_plan_id = str(latest_row["trajectory_plan_id"])
+                    plan_payload["supersedes_trajectory_plan_id"] = supersedes_trajectory_plan_id
+                payload_json = _canonical_json(plan_payload)
                 connection.execute(
                     """
                     INSERT INTO trajectory_plans (
@@ -654,9 +697,11 @@ class SQLiteJobIngestionRepository:
                         target_role,
                         idempotency_key,
                         request_json,
-                        payload_json
+                        payload_json,
+                        version,
+                        supersedes_trajectory_plan_id
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         trajectory_plan_id,
@@ -665,22 +710,36 @@ class SQLiteJobIngestionRepository:
                         idempotency_key,
                         request_json,
                         payload_json,
+                        next_version,
+                        supersedes_trajectory_plan_id,
                     ),
                 )
 
                 row = connection.execute(
-                    "SELECT payload_json FROM trajectory_plans WHERE trajectory_plan_id = ?",
+                    """
+                    SELECT payload_json, version, supersedes_trajectory_plan_id
+                    FROM trajectory_plans
+                    WHERE trajectory_plan_id = ?
+                    """,
                     (trajectory_plan_id,),
                 ).fetchone()
                 if row is None:
-                    return TrajectoryPlanCreateResult(status="not_found", plan=None)
+                    return TrajectoryPlanCreateResult(status="not_found", plan=None, current_version=None)
 
-                return TrajectoryPlanCreateResult(status="created", plan=_decode_json_object(str(row["payload_json"])))
+                return TrajectoryPlanCreateResult(
+                    status="created",
+                    plan=_row_to_trajectory_plan(row),
+                    current_version=int(row["version"]),
+                )
 
     def get_trajectory_plan_by_id(self, trajectory_plan_id: str) -> dict[str, Any] | None:
         with closing(self._connect()) as connection:
             row = connection.execute(
-                "SELECT payload_json FROM trajectory_plans WHERE trajectory_plan_id = ?",
+                """
+                SELECT payload_json, version, supersedes_trajectory_plan_id
+                FROM trajectory_plans
+                WHERE trajectory_plan_id = ?
+                """,
                 (trajectory_plan_id,),
             ).fetchone()
 
@@ -1208,7 +1267,18 @@ def _row_to_feedback_report(row: sqlite3.Row | None) -> dict[str, Any] | None:
 def _row_to_trajectory_plan(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
-    return _decode_json_object(str(row["payload_json"]))
+    payload = _decode_json_object(str(row["payload_json"]))
+    row_keys = set(row.keys())
+
+    if "version" in row_keys:
+        row_version = row["version"]
+        if isinstance(row_version, int):
+            payload["version"] = row_version
+
+    if "supersedes_trajectory_plan_id" in row_keys and row["supersedes_trajectory_plan_id"] is not None:
+        payload["supersedes_trajectory_plan_id"] = str(row["supersedes_trajectory_plan_id"])
+
+    return payload
 
 
 def _decode_json_list(raw: str) -> list[Any]:

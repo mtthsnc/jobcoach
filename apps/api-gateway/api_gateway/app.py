@@ -5,7 +5,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,7 @@ CANDIDATE_STORYBANK_PATH = ROOT_DIR / "services" / "candidate-profile" / "storyb
 INTERVIEW_PLANNER_PATH = ROOT_DIR / "services" / "interview-engine" / "planner.py"
 INTERVIEW_FOLLOWUP_PATH = ROOT_DIR / "services" / "interview-engine" / "followup.py"
 PROGRESS_AGGREGATOR_PATH = ROOT_DIR / "services" / "progress-tracking" / "aggregator.py"
+TRAJECTORY_PLANNER_PATH = ROOT_DIR / "services" / "trajectory-planning" / "generator.py"
 INTERVIEW_ROUTE_PREFIX = "/v1/interview-sessions/"
 INTERVIEW_RESPONSES_SUFFIX = "/responses"
 FEEDBACK_ROUTE_PREFIX = "/v1/feedback-reports/"
@@ -70,6 +71,7 @@ _CANDIDATE_STORYBANK_MODULE = _load_module("candidate_storybank_generator", CAND
 _INTERVIEW_PLANNER_MODULE = _load_module("interview_question_planner", INTERVIEW_PLANNER_PATH)
 _INTERVIEW_FOLLOWUP_MODULE = _load_module("interview_followup_selector", INTERVIEW_FOLLOWUP_PATH)
 _PROGRESS_AGGREGATOR_MODULE = _load_module("progress_aggregator", PROGRESS_AGGREGATOR_PATH)
+_TRAJECTORY_PLANNER_MODULE = _load_module("trajectory_planner", TRAJECTORY_PLANNER_PATH)
 
 
 class JobIngestionAPI:
@@ -85,6 +87,7 @@ class JobIngestionAPI:
         interview_question_planner: Any,
         interview_followup_selector: Any,
         progress_aggregator: Any,
+        trajectory_planner: Any,
     ) -> None:
         self._repository = repository
         self._extraction_worker = extraction_worker
@@ -95,6 +98,7 @@ class JobIngestionAPI:
         self._interview_question_planner = interview_question_planner
         self._interview_followup_selector = interview_followup_selector
         self._progress_aggregator = progress_aggregator
+        self._trajectory_planner = trajectory_planner
 
     def __call__(self, environ: dict[str, Any], start_response: Any) -> list[bytes]:
         method = str(environ.get("REQUEST_METHOD", "")).upper()
@@ -1077,6 +1081,8 @@ class JobIngestionAPI:
 
         candidate_id = str(payload["candidate_id"])
         target_role = str(payload["target_role"])
+        requested_horizon_months = payload.get("horizon_months")
+        resolved_horizon_months = requested_horizon_months if isinstance(requested_horizon_months, int) else None
 
         candidate_profile = self._repository.get_candidate_profile_by_id(candidate_id)
         if candidate_profile is None:
@@ -1100,8 +1106,10 @@ class JobIngestionAPI:
 
         trajectory_plan_payload = self._build_trajectory_plan_payload(
             candidate_id=candidate_id,
+            candidate_profile=candidate_profile,
             target_role=target_role,
             progress_summary=progress_summary,
+            requested_horizon_months=resolved_horizon_months,
         )
         validation = self._schema_validator.validate("TrajectoryPlan", trajectory_plan_payload)
         if not validation.is_valid:
@@ -1143,6 +1151,26 @@ class JobIngestionAPI:
                     code="idempotency_key_conflict",
                     message="Idempotency-Key is already associated with a different request",
                     retryable=False,
+                ),
+            )
+        if create_result.status == "version_conflict":
+            details: list[dict[str, str]] = []
+            if create_result.current_version is not None:
+                details.append(
+                    {
+                        "field": "expected_version",
+                        "reason": f"current version is {create_result.current_version}",
+                    }
+                )
+            return _json_response(
+                start_response,
+                HTTPStatus.CONFLICT,
+                _error_envelope(
+                    request_id=request_id,
+                    code="version_conflict",
+                    message="expected_version does not match current trajectory plan version",
+                    retryable=False,
+                    details=details or None,
                 ),
             )
         if create_result.plan is None:
@@ -1677,72 +1705,54 @@ class JobIngestionAPI:
         self,
         *,
         candidate_id: str,
+        candidate_profile: dict[str, Any],
         target_role: str,
         progress_summary: dict[str, Any],
+        requested_horizon_months: int | None = None,
     ) -> dict[str, Any]:
-        current_date = datetime.now(timezone.utc).date()
+        generated_plan = self._trajectory_planner.generate(
+            candidate_profile=candidate_profile,
+            target_role=target_role,
+            progress_summary=progress_summary,
+        )
+
         current_metrics = progress_summary.get("current") if isinstance(progress_summary, dict) else None
-        current_overall = None
+        current_overall: float | None = None
         if isinstance(current_metrics, dict):
             maybe_score = current_metrics.get("overall_score")
             if isinstance(maybe_score, (int, float)) and not isinstance(maybe_score, bool):
                 current_overall = round(float(maybe_score), 2)
 
+        horizon_months = 3
         role_readiness_score = current_overall if current_overall is not None else 65.0
-        milestones = [
-            {
-                "name": f"Establish {target_role} readiness baseline",
-                "target_date": (current_date + timedelta(days=14)).isoformat(),
-                "metric": "Complete 2 mock sessions with score deltas tracked per competency.",
-            },
-            {
-                "name": f"Close highest-risk competency gaps for {target_role}",
-                "target_date": (current_date + timedelta(days=42)).isoformat(),
-                "metric": "Raise top 2 gap competencies by at least 10 points each.",
-            },
-            {
-                "name": f"Demonstrate consistent {target_role} interview signal",
-                "target_date": (current_date + timedelta(days=84)).isoformat(),
-                "metric": "Sustain >=75 overall score across 3 consecutive sessions.",
-            },
-        ]
+        milestones: list[dict[str, Any]] = []
+        weekly_plan: list[dict[str, Any]] = []
 
-        weekly_plan = [
-            {
-                "week": 1,
-                "actions": [
-                    "Review latest feedback report and extract top root-cause tags.",
-                    "Draft STAR responses for 3 role-critical competencies.",
-                ],
-            },
-            {
-                "week": 2,
-                "actions": [
-                    "Run a timed mock session and score each response for clarity and evidence.",
-                    "Revise low-signal answers with quantified outcomes and tradeoff rationale.",
-                ],
-            },
-            {
-                "week": 3,
-                "actions": [
-                    "Practice follow-up depth for system and behavioral scenarios.",
-                    "Capture one concrete improvement metric per competency.",
-                ],
-            },
-            {
-                "week": 4,
-                "actions": [
-                    "Run a full simulation and compare trend movement against baseline.",
-                    "Prioritize next-cycle focus areas based on remaining high-risk gaps.",
-                ],
-            },
-        ]
+        if isinstance(generated_plan, dict):
+            raw_horizon = generated_plan.get("horizon_months")
+            if isinstance(raw_horizon, int):
+                horizon_months = max(1, min(24, raw_horizon))
+
+            raw_readiness = generated_plan.get("role_readiness_score")
+            if isinstance(raw_readiness, (int, float)) and not isinstance(raw_readiness, bool):
+                role_readiness_score = max(0.0, min(100.0, round(float(raw_readiness), 2)))
+
+            raw_milestones = generated_plan.get("milestones")
+            if isinstance(raw_milestones, list):
+                milestones = [item for item in raw_milestones if isinstance(item, dict)]
+
+            raw_weekly = generated_plan.get("weekly_plan")
+            if isinstance(raw_weekly, list):
+                weekly_plan = [item for item in raw_weekly if isinstance(item, dict)]
+
+        if isinstance(requested_horizon_months, int):
+            horizon_months = max(1, min(24, requested_horizon_months))
 
         return {
             "trajectory_plan_id": f"tp_{uuid4().hex}",
             "candidate_id": candidate_id,
             "target_role": target_role,
-            "horizon_months": 3,
+            "horizon_months": horizon_months,
             "role_readiness_score": role_readiness_score,
             "milestones": milestones,
             "weekly_plan": weekly_plan,
@@ -1761,6 +1771,7 @@ def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
     interview_question_planner = _INTERVIEW_PLANNER_MODULE.DeterministicQuestionPlanner()
     interview_followup_selector = _INTERVIEW_FOLLOWUP_MODULE.AdaptiveFollowupSelector()
     progress_aggregator = _PROGRESS_AGGREGATOR_MODULE.LongitudinalProgressAggregator()
+    trajectory_planner = _TRAJECTORY_PLANNER_MODULE.DeterministicTrajectoryPlanner()
     return JobIngestionAPI(
         repository=SQLiteJobIngestionRepository(resolved_db_path),
         extraction_worker=extraction_worker,
@@ -1771,6 +1782,7 @@ def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
         interview_question_planner=interview_question_planner,
         interview_followup_selector=interview_followup_selector,
         progress_aggregator=progress_aggregator,
+        trajectory_planner=trajectory_planner,
     )
 
 
@@ -1918,6 +1930,25 @@ def _validate_create_trajectory_plan_payload(payload: dict[str, Any]) -> list[di
     target_role = payload.get("target_role")
     if not isinstance(target_role, str) or not target_role.strip():
         errors.append({"field": "target_role", "reason": "must be a non-empty string"})
+
+    horizon_months = payload.get("horizon_months")
+    if horizon_months is not None and (
+        not isinstance(horizon_months, int)
+        or isinstance(horizon_months, bool)
+        or horizon_months < 1
+        or horizon_months > 24
+    ):
+        errors.append({"field": "horizon_months", "reason": "must be an integer between 1 and 24 when provided"})
+
+    expected_version = payload.get("expected_version")
+    if expected_version is not None and (
+        not isinstance(expected_version, int) or isinstance(expected_version, bool) or expected_version < 0
+    ):
+        errors.append({"field": "expected_version", "reason": "must be an integer >= 0 when provided"})
+
+    regenerate = payload.get("regenerate")
+    if regenerate is not None and not isinstance(regenerate, bool):
+        errors.append({"field": "regenerate", "reason": "must be a boolean when provided"})
 
     return errors
 

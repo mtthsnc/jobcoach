@@ -1114,6 +1114,8 @@ class JobIngestionApiContractTest(unittest.TestCase):
         assert isinstance(trajectory_plan_id, str)
         self.assertEqual(data.get("candidate_id"), candidate_id)
         self.assertEqual(data.get("target_role"), target_role)
+        self.assertEqual(data.get("version"), 1)
+        self.assertIsNone(data.get("supersedes_trajectory_plan_id"))
         self.assertIsInstance(data.get("milestones"), list)
         self.assertGreaterEqual(len(data.get("milestones", [])), 1)
         progress_summary = data.get("progress_summary")
@@ -1161,6 +1163,8 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(get_body.get("data", {}).get("milestones"), data.get("milestones"))
         self.assertEqual(get_body.get("data", {}).get("weekly_plan"), data.get("weekly_plan"))
         self.assertEqual(get_body.get("data", {}).get("progress_summary"), data.get("progress_summary"))
+        self.assertEqual(get_body.get("data", {}).get("version"), 1)
+        self.assertIsNone(get_body.get("data", {}).get("supersedes_trajectory_plan_id"))
 
         self._assert_trajectory_plan_row_persisted(
             trajectory_plan_id=trajectory_plan_id,
@@ -1168,6 +1172,110 @@ class JobIngestionApiContractTest(unittest.TestCase):
             target_role=target_role,
             idempotency_key=idempotency_key,
         )
+
+    def test_trajectory_plan_generation_is_date_ordered_and_evidence_linked_contract(self) -> None:
+        candidate_id = self._create_candidate_entity_for_interview()
+        job_spec_id = self._create_job_spec_entity_for_interview()
+
+        create_session_status, create_session_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions",
+            body={
+                "job_spec_id": job_spec_id,
+                "candidate_id": candidate_id,
+                "mode": "mock_interview",
+            },
+        )
+        self.assertEqual(create_session_status, 201, create_session_body)
+        session_data = create_session_body.get("data", {})
+        session_id = session_data.get("session_id")
+        self.assertIsInstance(session_id, str)
+        self.assertTrue(session_id)
+        assert isinstance(session_id, str)
+        questions = session_data.get("questions", [])
+        self.assertIsInstance(questions, list)
+        self.assertGreaterEqual(len(questions), 1)
+        first_question = questions[0]
+        self.assertIsInstance(first_question, dict)
+        assert isinstance(first_question, dict)
+
+        respond_status, respond_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions/{session_id}/responses",
+            body={
+                "question_id": first_question.get("question_id"),
+                "response": "I collaborated on an API migration and improved reliability.",
+            },
+            headers={"Idempotency-Key": f"trajectory-evidence-response-{uuid.uuid4()}"},
+        )
+        self.assertEqual(respond_status, 200, respond_body)
+
+        feedback_status, feedback_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/feedback-reports",
+            body={"session_id": session_id},
+            headers={"Idempotency-Key": f"trajectory-evidence-feedback-{uuid.uuid4()}"},
+        )
+        self.assertEqual(feedback_status, 201, feedback_body)
+
+        first_create_status, first_create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={"candidate_id": candidate_id, "target_role": "Senior Backend Engineer"},
+            headers={"Idempotency-Key": f"trajectory-evidence-create-{uuid.uuid4()}"},
+        )
+        self.assertEqual(first_create_status, 201, first_create_body)
+        first_plan = first_create_body.get("data", {})
+
+        second_create_status, second_create_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={"candidate_id": candidate_id, "target_role": "Senior Backend Engineer"},
+            headers={"Idempotency-Key": f"trajectory-evidence-create-{uuid.uuid4()}"},
+        )
+        self.assertEqual(second_create_status, 201, second_create_body)
+        second_plan = second_create_body.get("data", {})
+        first_version = first_plan.get("version")
+        second_version = second_plan.get("version")
+        self.assertIsInstance(first_version, int)
+        self.assertIsInstance(second_version, int)
+        assert isinstance(first_version, int)
+        assert isinstance(second_version, int)
+        self.assertEqual(second_version, first_version + 1)
+        self.assertNotEqual(second_plan.get("trajectory_plan_id"), first_plan.get("trajectory_plan_id"))
+        self.assertEqual(second_plan.get("supersedes_trajectory_plan_id"), first_plan.get("trajectory_plan_id"))
+        self.assertEqual(second_plan.get("milestones"), first_plan.get("milestones"))
+        self.assertEqual(second_plan.get("weekly_plan"), first_plan.get("weekly_plan"))
+
+        milestones = first_plan.get("milestones")
+        self.assertIsInstance(milestones, list)
+        assert isinstance(milestones, list)
+        self.assertGreaterEqual(len(milestones), 3)
+        milestone_dates = [str(item.get("target_date", "")) for item in milestones if isinstance(item, dict)]
+        self.assertEqual(milestone_dates, sorted(milestone_dates))
+
+        weekly_plan = first_plan.get("weekly_plan")
+        self.assertIsInstance(weekly_plan, list)
+        assert isinstance(weekly_plan, list)
+        self.assertGreaterEqual(len(weekly_plan), 4)
+        self.assertLessEqual(len(weekly_plan), 8)
+        self.assertEqual([entry.get("week") for entry in weekly_plan], list(range(1, len(weekly_plan) + 1)))
+        first_week_actions = " ".join(str(action) for action in weekly_plan[0].get("actions", [])).lower()
+        self.assertIn("current=", first_week_actions)
+        self.assertIn("target=", first_week_actions)
+        self.assertIn("delta=", first_week_actions)
+
+        progress_summary = first_plan.get("progress_summary", {})
+        self.assertIsInstance(progress_summary, dict)
+        top_risk = progress_summary.get("top_risk_competencies", [])
+        if isinstance(top_risk, list) and top_risk:
+            expected_label = str(top_risk[0]).replace("skill.", "").replace("_", " ").lower()
+            self.assertIn(expected_label, first_week_actions)
 
     def test_trajectory_plan_idempotency_conflict_contract(self) -> None:
         candidate_id = self._create_candidate_entity_for_interview()
@@ -1215,6 +1323,101 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(conflict_status, 409, conflict_body)
         self.assertEqual(conflict_body.get("error", {}).get("code"), "idempotency_key_conflict")
 
+    def test_trajectory_plan_expected_version_conflict_and_regeneration_contract(self) -> None:
+        candidate_id = self._create_candidate_entity_for_interview()
+        target_role = "Staff Backend Engineer"
+
+        first_status, first_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={"candidate_id": candidate_id, "target_role": target_role},
+            headers={"Idempotency-Key": f"trajectory-version-initial-{uuid.uuid4()}"},
+        )
+        self.assertEqual(first_status, 201, first_body)
+        first_data = first_body.get("data", {})
+        first_plan_id = first_data.get("trajectory_plan_id")
+        self.assertIsInstance(first_plan_id, str)
+        self.assertTrue(first_plan_id)
+        assert isinstance(first_plan_id, str)
+        self.assertEqual(first_data.get("version"), 1)
+        self.assertIsNone(first_data.get("supersedes_trajectory_plan_id"))
+
+        conflict_status, conflict_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+                "regenerate": True,
+                "expected_version": 0,
+            },
+            headers={"Idempotency-Key": f"trajectory-version-conflict-{uuid.uuid4()}"},
+        )
+        self.assertEqual(conflict_status, 409, conflict_body)
+        self.assertEqual(conflict_body.get("error", {}).get("code"), "version_conflict")
+        conflict_details = conflict_body.get("error", {}).get("details", [])
+        self.assertTrue(any("current version is 1" in str(item.get("reason", "")) for item in conflict_details))
+
+        regenerate_key = f"trajectory-version-next-{uuid.uuid4()}"
+        second_status, second_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+                "regenerate": True,
+                "expected_version": 1,
+            },
+            headers={"Idempotency-Key": regenerate_key},
+        )
+        self.assertEqual(second_status, 201, second_body)
+        second_data = second_body.get("data", {})
+        second_plan_id = second_data.get("trajectory_plan_id")
+        self.assertIsInstance(second_plan_id, str)
+        self.assertTrue(second_plan_id)
+        assert isinstance(second_plan_id, str)
+        self.assertNotEqual(second_plan_id, first_plan_id)
+        self.assertEqual(second_data.get("version"), 2)
+        self.assertEqual(second_data.get("supersedes_trajectory_plan_id"), first_plan_id)
+
+        regenerate_replay_status, regenerate_replay_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+                "regenerate": True,
+                "expected_version": 1,
+            },
+            headers={"Idempotency-Key": regenerate_key},
+        )
+        self.assertEqual(regenerate_replay_status, 201, regenerate_replay_body)
+        replay_data = regenerate_replay_body.get("data", {})
+        self.assertEqual(replay_data.get("trajectory_plan_id"), second_plan_id)
+        self.assertEqual(replay_data.get("version"), 2)
+        self.assertEqual(replay_data.get("supersedes_trajectory_plan_id"), first_plan_id)
+
+        stale_status, stale_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+                "regenerate": True,
+                "expected_version": 1,
+            },
+            headers={"Idempotency-Key": f"trajectory-version-stale-{uuid.uuid4()}"},
+        )
+        self.assertEqual(stale_status, 409, stale_body)
+        self.assertEqual(stale_body.get("error", {}).get("code"), "version_conflict")
+        stale_details = stale_body.get("error", {}).get("details", [])
+        self.assertTrue(any("current version is 2" in str(item.get("reason", "")) for item in stale_details))
+
     def test_trajectory_plan_validation_and_not_found_contract(self) -> None:
         candidate_id = self._create_candidate_entity_for_interview()
 
@@ -1239,6 +1442,34 @@ class JobIngestionApiContractTest(unittest.TestCase):
         )
         self.assertEqual(invalid_body_status, 400, invalid_body)
         self.assertEqual(invalid_body.get("error", {}).get("code"), "invalid_request")
+
+        invalid_expected_status, invalid_expected_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Backend Engineer",
+                "expected_version": -1,
+            },
+            headers={"Idempotency-Key": "trajectory-invalid-expected-version-001"},
+        )
+        self.assertEqual(invalid_expected_status, 400, invalid_expected_body)
+        self.assertEqual(invalid_expected_body.get("error", {}).get("code"), "invalid_request")
+
+        invalid_regenerate_status, invalid_regenerate_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Backend Engineer",
+                "regenerate": "yes",
+            },
+            headers={"Idempotency-Key": "trajectory-invalid-regenerate-001"},
+        )
+        self.assertEqual(invalid_regenerate_status, 400, invalid_regenerate_body)
+        self.assertEqual(invalid_regenerate_body.get("error", {}).get("code"), "invalid_request")
 
         missing_candidate_status, missing_candidate_body = _request_json(
             self.base_url,
@@ -1606,11 +1837,20 @@ class JobIngestionApiContractTest(unittest.TestCase):
         candidate_id: str,
         target_role: str,
         idempotency_key: str,
+        expected_version: int = 1,
+        expected_supersedes_trajectory_plan_id: str | None = None,
     ) -> None:
         with closing(sqlite3.connect(self.db_path)) as conn:
             row = conn.execute(
                 """
-                SELECT trajectory_plan_id, candidate_id, target_role, idempotency_key, payload_json
+                SELECT
+                    trajectory_plan_id,
+                    candidate_id,
+                    target_role,
+                    idempotency_key,
+                    payload_json,
+                    version,
+                    supersedes_trajectory_plan_id
                 FROM trajectory_plans
                 WHERE trajectory_plan_id = ?
                 """,
@@ -1623,10 +1863,14 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(row[1], candidate_id)
         self.assertEqual(row[2], target_role)
         self.assertEqual(row[3], idempotency_key)
+        self.assertEqual(int(row[5]), expected_version)
+        self.assertEqual(row[6], expected_supersedes_trajectory_plan_id)
         payload = json.loads(str(row[4]))
         self.assertEqual(payload.get("trajectory_plan_id"), trajectory_plan_id)
         self.assertEqual(payload.get("candidate_id"), candidate_id)
         self.assertEqual(payload.get("target_role"), target_role)
+        self.assertEqual(payload.get("version"), expected_version)
+        self.assertEqual(payload.get("supersedes_trajectory_plan_id"), expected_supersedes_trajectory_plan_id)
         self.assertIsInstance(payload.get("milestones"), list)
         self.assertGreaterEqual(len(payload.get("milestones", [])), 1)
 

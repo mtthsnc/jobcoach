@@ -1338,3 +1338,112 @@ Use UTC timestamps. Append entries only.
   - No remaining blockers for `M5-002`.
 - Next pointer:
   - Execute `M5-003` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T22:49:03Z
+- Execute `M5-003` trajectory milestone/weekly-plan generator from trend metrics and target-role competency gaps.
+- Task IDs: M5-003
+- Changes made:
+  - Added deterministic trajectory planner module `services/trajectory-planning/generator.py`:
+    - infers target-role competency targets,
+    - ranks competency gaps using trend deltas + top-risk emphasis,
+    - generates date-ordered milestones and bounded weekly plan actions with explicit evidence tokens (`current=`, `target=`, `delta=`).
+  - Integrated planner into trajectory plan orchestration in `apps/api-gateway/api_gateway/app.py`:
+    - load/inject planner at app startup,
+    - pass candidate profile + progress summary into plan generation,
+    - replace static trajectory milestones/weekly actions with generated deterministic output.
+  - Added planner unit coverage in `tests/unit/test_trajectory_generator.py` for deterministic output, date ordering, and evidence-linked actions on fixed fixtures.
+  - Expanded endpoint-level regression coverage:
+    - `tests/unit/test_job_spec_persistence.py` now asserts deterministic milestone/weekly generation, date ordering, and evidence-linked weekly actions.
+    - `tests/contracts/test_job_ingestions_api_contract.py` now includes deterministic trajectory generation contract checks with seeded trend history.
+  - Logged decision `DEC-006` for deterministic evidence-linked trajectory generation policy.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_trajectory_generator.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `make test`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make contract-test`
+- Blockers / risks:
+  - No blockers encountered.
+- Next pointer:
+  - Close `M5-003` in planning docs and advance pointer to `M5-004`.
+
+- END
+- 2026-02-28T23:00:02Z
+- Execute `M5-003` trajectory milestone/weekly-plan generator from trend metrics and target-role competency gaps.
+- Task IDs: M5-003
+- Changes made:
+  - Marked `M5-003` as `DONE` in `docs/tasklist.md`.
+  - Updated `docs/tasklist.md` NEXT queue to prioritize `M5-004` then `M5-005`.
+  - Updated `docs/NEXT_ACTION.md` active pointer to `M5-004` with persistence/versioning next steps.
+- Validation evidence:
+  - `make test`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make contract-test`
+- Blockers / risks:
+  - No remaining blockers for `M5-003`.
+- Next pointer:
+  - Execute `M5-004` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-02-28T23:00:18Z
+- Execute `M5-004` trajectory plan persistence/versioning hardening.
+- Task IDs: M5-004
+- Changes made:
+  - Added migration `infra/migrations/009_m5_trajectory_plan_versioning.sql`:
+    - introduced `trajectory_plans.version`,
+    - introduced `trajectory_plans.supersedes_trajectory_plan_id`,
+    - backfilled deterministic version ordering for existing rows,
+    - added candidate/role version uniqueness and latest-version indexes.
+  - Extended repository flow in `apps/api-gateway/api_gateway/repository.py`:
+    - `create_or_get_trajectory_plan` now enforces optional `expected_version` optimistic checks,
+    - preserves idempotent replay/conflict behavior for `Idempotency-Key`,
+    - persists incrementing trajectory versions with supersede linkage,
+    - hydrates version metadata on replay/get paths.
+  - Updated trajectory API behavior in `apps/api-gateway/api_gateway/app.py`:
+    - validates `expected_version` and `regenerate` request fields,
+    - returns deterministic `version_conflict` envelope with current-version detail on mismatch,
+    - supports optional `horizon_months` override passthrough in generated payload metadata.
+  - Updated trajectory contract schemas:
+    - `schemas/openapi/openapi-m0-m2.yaml`: added request `expected_version`/`regenerate`; added response `version`/`supersedes_trajectory_plan_id`.
+    - `schemas/jsonschema/core-schemas.json`: added trajectory `version` and supersede-link fields.
+  - Expanded regression coverage:
+    - `tests/unit/test_job_spec_persistence.py` with trajectory version progression + expected-version conflict assertions and request-shape validation cases.
+    - `tests/contracts/test_job_ingestions_api_contract.py` with trajectory version conflict/regeneration contract coverage and persistence assertions for version metadata.
+  - Logged decision `DEC-007` for versioned trajectory persistence semantics.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests/contracts/test_job_ingestions_api_contract.py`
+  - `make test`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make contract-test`
+- Blockers / risks:
+  - One transient contract assertion assumed first trajectory version was always `1` for a shared seeded candidate; corrected to compare relative version increments in-test.
+- Next pointer:
+  - Close `M5-004` in planning docs and advance pointer to `M5-005`.
+
+- END
+- 2026-02-28T23:12:51Z
+- Execute `M5-004` trajectory plan persistence/versioning hardening.
+- Task IDs: M5-004
+- Changes made:
+  - Marked `M5-004` as `DONE` in `docs/tasklist.md`.
+  - Updated `docs/tasklist.md` NEXT queue to prioritize `M5-005` then `M5-006`.
+  - Updated `docs/NEXT_ACTION.md` active pointer to `M5-005` with dashboard/read-model next steps.
+- Validation evidence:
+  - `make test`
+  - `make validate-openapi`
+  - `make migrate-up`
+  - `make migrate-down`
+  - `make contract-test`
+- Blockers / risks:
+  - No remaining blockers for `M5-004`.
+- Next pointer:
+  - Execute `M5-005` from `docs/NEXT_ACTION.md`.

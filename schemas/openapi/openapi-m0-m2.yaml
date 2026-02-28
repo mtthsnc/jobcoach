@@ -726,6 +726,11 @@ components:
           type: integer
           minimum: 1
           maximum: 24
+        expected_version:
+          type: integer
+          minimum: 0
+        regenerate:
+          type: boolean
 
     TrajectoryPlanResponse:
       type: object
@@ -866,6 +871,11 @@ components:
         trajectory_plan_id: { type: string }
         candidate_id: { type: string }
         target_role: { type: string }
+        version:
+          type: integer
+          minimum: 1
+        supersedes_trajectory_plan_id:
+          type: string
         horizon_months:
           type: integer
           minimum: 1

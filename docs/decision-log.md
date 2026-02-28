@@ -72,3 +72,27 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Use latest feedback report only for trend metrics.
   - Use non-deterministic ranking of competencies when deltas tie.
+
+- Decision ID: `DEC-006`
+- Date (UTC): `2026-02-28`
+- Status: `accepted`
+- Context: Trajectory outputs must convert trend metrics into actionable plans while remaining deterministic across idempotent regeneration and contract validation.
+- Decision: Introduce a deterministic trajectory planner that ranks competency gaps using target-role expectations plus trend risk, then generates bounded weekly actions with explicit evidence tokens (`current=`, `target=`, `delta=`) and date-ordered milestones.
+- Consequences:
+  - Trajectory plan generation is repeatable for fixed inputs and explicitly traceable to underlying trend evidence.
+  - Plan language is now coupled to deterministic templates, reducing stylistic variance but improving regression stability.
+- Alternatives considered:
+  - Keep static milestone/weekly templates and attach progress summary only.
+  - Use unconstrained natural-language generation for weekly actions without deterministic evidence linkage.
+
+- Decision ID: `DEC-007`
+- Date (UTC): `2026-02-28`
+- Status: `accepted`
+- Context: Trajectory generation now produces deterministic plans, but persistence needed explicit version progression to support regeneration workflows and stale-write protection.
+- Decision: Version trajectory plans per `(candidate_id, target_role)` with optimistic `expected_version` checks, idempotent key replay/conflict behavior, and supersede linkage to prior plan versions.
+- Consequences:
+  - Regenerated trajectory plans are auditable and conflict-safe under concurrent clients.
+  - API/contracts and migration surface area increased (`version`, `supersedes_trajectory_plan_id`, request version fields).
+- Alternatives considered:
+  - Keep single trajectory row per candidate/role and overwrite payload in place.
+  - Depend only on idempotency-key replay without explicit version progression or optimistic conflict checks.
