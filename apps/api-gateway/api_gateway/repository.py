@@ -91,6 +91,7 @@ class TrajectoryPlanCreateResult:
 class NegotiationPlanCreateResult:
     status: str
     plan: dict[str, Any] | None
+    current_version: int | None
 
 
 class SQLiteJobIngestionRepository:
@@ -627,6 +628,10 @@ class SQLiteJobIngestionRepository:
             )
 
         request_json = _canonical_json(request_payload)
+        expected_version_raw = request_payload.get("expected_version")
+        expected_version: int | None = None
+        if isinstance(expected_version_raw, int) and not isinstance(expected_version_raw, bool):
+            expected_version = expected_version_raw
 
         with closing(self._connect()) as connection:
             with connection:
@@ -635,11 +640,11 @@ class SQLiteJobIngestionRepository:
                     (candidate_id,),
                 ).fetchone()
                 if candidate_row is None:
-                    return NegotiationPlanCreateResult(status="candidate_not_found", plan=None)
+                    return NegotiationPlanCreateResult(status="candidate_not_found", plan=None, current_version=None)
 
                 existing_row = connection.execute(
                     """
-                    SELECT request_json, payload_json
+                    SELECT request_json, payload_json, version, supersedes_negotiation_plan_id
                     FROM negotiation_plans
                     WHERE idempotency_key = ?
                     """,
@@ -648,11 +653,49 @@ class SQLiteJobIngestionRepository:
                 if existing_row is not None:
                     existing_request_json = str(existing_row["request_json"])
                     existing_payload = _row_to_negotiation_plan(existing_row)
+                    existing_version_raw = existing_payload.get("version") if isinstance(existing_payload, dict) else None
+                    existing_version = int(existing_row["version"]) if isinstance(existing_row["version"], int) else None
+                    if existing_version is None and isinstance(existing_version_raw, int):
+                        existing_version = int(existing_version_raw)
                     if existing_request_json == request_json:
-                        return NegotiationPlanCreateResult(status="idempotent_replay", plan=existing_payload)
-                    return NegotiationPlanCreateResult(status="idempotency_conflict", plan=existing_payload)
+                        return NegotiationPlanCreateResult(
+                            status="idempotent_replay",
+                            plan=existing_payload,
+                            current_version=existing_version,
+                        )
+                    return NegotiationPlanCreateResult(
+                        status="idempotency_conflict",
+                        plan=existing_payload,
+                        current_version=existing_version,
+                    )
 
-                payload_json = _canonical_json(negotiation_plan)
+                latest_row = connection.execute(
+                    """
+                    SELECT negotiation_plan_id, payload_json, version, supersedes_negotiation_plan_id
+                    FROM negotiation_plans
+                    WHERE candidate_id = ? AND target_role = ?
+                    ORDER BY version DESC, created_at DESC, negotiation_plan_id DESC
+                    LIMIT 1
+                    """,
+                    (candidate_id, target_role),
+                ).fetchone()
+                current_version = int(latest_row["version"]) if latest_row is not None else 0
+                if expected_version is not None and expected_version != current_version:
+                    latest_payload = _row_to_negotiation_plan(latest_row) if latest_row is not None else None
+                    return NegotiationPlanCreateResult(
+                        status="version_conflict",
+                        plan=latest_payload,
+                        current_version=current_version,
+                    )
+
+                plan_payload = json.loads(json.dumps(negotiation_plan))
+                next_version = current_version + 1
+                plan_payload["version"] = next_version
+                supersedes_negotiation_plan_id: str | None = None
+                if latest_row is not None:
+                    supersedes_negotiation_plan_id = str(latest_row["negotiation_plan_id"])
+                    plan_payload["supersedes_negotiation_plan_id"] = supersedes_negotiation_plan_id
+                payload_json = _canonical_json(plan_payload)
                 connection.execute(
                     """
                     INSERT INTO negotiation_plans (
@@ -661,9 +704,11 @@ class SQLiteJobIngestionRepository:
                         target_role,
                         idempotency_key,
                         request_json,
-                        payload_json
+                        payload_json,
+                        version,
+                        supersedes_negotiation_plan_id
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         negotiation_plan_id,
@@ -672,27 +717,33 @@ class SQLiteJobIngestionRepository:
                         idempotency_key,
                         request_json,
                         payload_json,
+                        next_version,
+                        supersedes_negotiation_plan_id,
                     ),
                 )
 
                 row = connection.execute(
                     """
-                    SELECT payload_json
+                    SELECT payload_json, version, supersedes_negotiation_plan_id
                     FROM negotiation_plans
                     WHERE negotiation_plan_id = ?
                     """,
                     (negotiation_plan_id,),
                 ).fetchone()
                 if row is None:
-                    return NegotiationPlanCreateResult(status="not_found", plan=None)
+                    return NegotiationPlanCreateResult(status="not_found", plan=None, current_version=None)
 
-                return NegotiationPlanCreateResult(status="created", plan=_row_to_negotiation_plan(row))
+                return NegotiationPlanCreateResult(
+                    status="created",
+                    plan=_row_to_negotiation_plan(row),
+                    current_version=int(row["version"]),
+                )
 
     def get_negotiation_plan_by_id(self, negotiation_plan_id: str) -> dict[str, Any] | None:
         with closing(self._connect()) as connection:
             row = connection.execute(
                 """
-                SELECT payload_json
+                SELECT payload_json, version, supersedes_negotiation_plan_id
                 FROM negotiation_plans
                 WHERE negotiation_plan_id = ?
                 """,
@@ -1395,7 +1446,18 @@ def _row_to_feedback_report(row: sqlite3.Row | None) -> dict[str, Any] | None:
 def _row_to_negotiation_plan(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
-    return _decode_json_object(str(row["payload_json"]))
+    payload = _decode_json_object(str(row["payload_json"]))
+    row_keys = set(row.keys())
+
+    if "version" in row_keys:
+        row_version = row["version"]
+        if isinstance(row_version, int):
+            payload["version"] = row_version
+
+    if "supersedes_negotiation_plan_id" in row_keys and row["supersedes_negotiation_plan_id"] is not None:
+        payload["supersedes_negotiation_plan_id"] = str(row["supersedes_negotiation_plan_id"])
+
+    return payload
 
 
 def _row_to_trajectory_plan(row: sqlite3.Row | None) -> dict[str, Any] | None:
