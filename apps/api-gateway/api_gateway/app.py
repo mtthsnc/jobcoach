@@ -27,6 +27,7 @@ INTERVIEW_FOLLOWUP_PATH = ROOT_DIR / "services" / "interview-engine" / "followup
 PROGRESS_AGGREGATOR_PATH = ROOT_DIR / "services" / "progress-tracking" / "aggregator.py"
 TRAJECTORY_PLANNER_PATH = ROOT_DIR / "services" / "trajectory-planning" / "generator.py"
 NEGOTIATION_CONTEXT_AGGREGATOR_PATH = ROOT_DIR / "services" / "negotiation-planning" / "aggregator.py"
+NEGOTIATION_STRATEGY_GENERATOR_PATH = ROOT_DIR / "services" / "negotiation-planning" / "generator.py"
 INTERVIEW_ROUTE_PREFIX = "/v1/interview-sessions/"
 INTERVIEW_RESPONSES_SUFFIX = "/responses"
 FEEDBACK_ROUTE_PREFIX = "/v1/feedback-reports/"
@@ -79,6 +80,10 @@ _NEGOTIATION_CONTEXT_AGGREGATOR_MODULE = _load_module(
     "negotiation_context_aggregator",
     NEGOTIATION_CONTEXT_AGGREGATOR_PATH,
 )
+_NEGOTIATION_STRATEGY_GENERATOR_MODULE = _load_module(
+    "negotiation_strategy_generator",
+    NEGOTIATION_STRATEGY_GENERATOR_PATH,
+)
 
 
 class JobIngestionAPI:
@@ -96,6 +101,7 @@ class JobIngestionAPI:
         progress_aggregator: Any,
         trajectory_planner: Any,
         negotiation_context_aggregator: Any,
+        negotiation_strategy_generator: Any,
     ) -> None:
         self._repository = repository
         self._extraction_worker = extraction_worker
@@ -108,6 +114,7 @@ class JobIngestionAPI:
         self._progress_aggregator = progress_aggregator
         self._trajectory_planner = trajectory_planner
         self._negotiation_context_aggregator = negotiation_context_aggregator
+        self._negotiation_strategy_generator = negotiation_strategy_generator
 
     def __call__(self, environ: dict[str, Any], start_response: Any) -> list[bytes]:
         method = str(environ.get("REQUEST_METHOD", "")).upper()
@@ -2107,67 +2114,83 @@ class JobIngestionAPI:
         if recommended_counter_base_salary > anchor_base_salary:
             recommended_counter_base_salary = anchor_base_salary
 
-        skills = candidate_profile.get("skills")
-        strength_labels: list[str] = []
-        if isinstance(skills, dict):
-            ranked_strengths: list[tuple[float, str]] = []
-            for skill_name, raw_score in skills.items():
-                if not isinstance(skill_name, str):
-                    continue
-                if not isinstance(raw_score, (int, float)) or isinstance(raw_score, bool):
-                    continue
-                ranked_strengths.append((float(raw_score), skill_name))
-            ranked_strengths.sort(key=lambda item: (-item[0], item[1]))
-            for _, skill_name in ranked_strengths[:3]:
-                strength_labels.append(skill_name.replace("skill.", "").replace("_", " "))
+        compensation_targets = {
+            "currency": compensation_currency,
+            "current_base_salary": current_base_salary,
+            "target_base_salary": target_base_salary,
+            "anchor_base_salary": anchor_base_salary,
+            "walk_away_base_salary": walk_away_base_salary,
+            "recommended_counter_base_salary": recommended_counter_base_salary,
+            "market_reference_base_salary": market_reference_base_salary,
+            "confidence": confidence,
+        }
 
-        if not strength_labels:
-            strength_labels = ["delivery impact", "cross-functional communication", "technical depth"]
-
-        role_focus = target_role.strip() or "target role"
-        lead_strength = strength_labels[0]
-        supporting_strengths = ", ".join(strength_labels[:3])
         leverage_signals = _normalize_negotiation_leverage_signals(negotiation_context.get("leverage_signals"))
         risk_signals = _normalize_negotiation_risk_signals(negotiation_context.get("risk_signals"))
         evidence_links = _normalize_negotiation_evidence_links(negotiation_context.get("evidence_links"))
 
-        lead_leverage = (
-            str(leverage_signals[0].get("signal", "")).replace("_", " ")
-            if leverage_signals
-            else "performance momentum"
+        generated_strategy = self._negotiation_strategy_generator.generate(
+            target_role=target_role,
+            compensation_targets=compensation_targets,
+            leverage_signals=leverage_signals,
+            risk_signals=risk_signals,
+            evidence_links=evidence_links,
         )
-        lead_risk = (
-            str(risk_signals[0].get("signal", "")).replace("_", " ")
-            if risk_signals
-            else "timeline pressure"
+
+        anchor_band = _normalize_negotiation_anchor_band(
+            generated_strategy.get("anchor_band"),
+            compensation_targets=compensation_targets,
         )
+        concession_ladder = _normalize_negotiation_concession_ladder(
+            generated_strategy.get("concession_ladder"),
+            anchor_band=anchor_band,
+            leverage_signals=leverage_signals,
+            risk_signals=risk_signals,
+        )
+        objection_playbook = _normalize_negotiation_objection_playbook(
+            generated_strategy.get("objection_playbook"),
+            risk_signals=risk_signals,
+            leverage_signals=leverage_signals,
+            evidence_links=evidence_links,
+            anchor_band=anchor_band,
+        )
+        talking_points = _normalize_negotiation_talking_points(
+            generated_strategy.get("talking_points"),
+            anchor_band=anchor_band,
+            leverage_signals=leverage_signals,
+            risk_signals=risk_signals,
+        )
+        strategy_summary_raw = generated_strategy.get("strategy_summary")
+        strategy_summary = str(strategy_summary_raw).strip() if isinstance(strategy_summary_raw, str) else ""
+        if not strategy_summary:
+            lead_leverage = (
+                str(leverage_signals[0].get("signal", "")).replace("_", " ")
+                if leverage_signals
+                else "performance momentum"
+            )
+            lead_risk = (
+                str(risk_signals[0].get("signal", "")).replace("_", " ")
+                if risk_signals
+                else "timeline pressure"
+            )
+            strategy_summary = (
+                f"Anchor near {anchor_band.get('ceiling_base_salary', anchor_base_salary)} with {lead_leverage}, "
+                f"hold floor at {anchor_band.get('floor_base_salary', walk_away_base_salary)}, and pre-handle {lead_risk}."
+            )
 
         payload: dict[str, Any] = {
             "negotiation_plan_id": f"np_{uuid4().hex}",
             "candidate_id": candidate_id,
             "target_role": target_role,
-            "strategy_summary": (
-                f"Lead with evidence-backed {lead_strength} outcomes for {role_focus}, "
-                f"anchor around {lead_leverage}, and pre-handle {lead_risk} before concessions."
-            ),
-            "compensation_targets": {
-                "currency": compensation_currency,
-                "current_base_salary": current_base_salary,
-                "target_base_salary": target_base_salary,
-                "anchor_base_salary": anchor_base_salary,
-                "walk_away_base_salary": walk_away_base_salary,
-                "recommended_counter_base_salary": recommended_counter_base_salary,
-                "market_reference_base_salary": market_reference_base_salary,
-                "confidence": confidence,
-            },
+            "strategy_summary": strategy_summary,
+            "compensation_targets": compensation_targets,
             "leverage_signals": leverage_signals,
             "risk_signals": risk_signals,
             "evidence_links": evidence_links,
-            "talking_points": [
-                f"Open with recent wins tied to {supporting_strengths}.",
-                f"Anchor near {anchor_base_salary} with market and readiness evidence before discussing concessions.",
-                "Trade concessions only for explicit commitments (level, scope, review timeline, or sign-on).",
-            ],
+            "anchor_band": anchor_band,
+            "concession_ladder": concession_ladder,
+            "objection_playbook": objection_playbook,
+            "talking_points": talking_points,
             "follow_up_actions": [
                 {
                     "day_offset": 0,
@@ -2288,6 +2311,7 @@ def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
     progress_aggregator = _PROGRESS_AGGREGATOR_MODULE.LongitudinalProgressAggregator()
     trajectory_planner = _TRAJECTORY_PLANNER_MODULE.DeterministicTrajectoryPlanner()
     negotiation_context_aggregator = _NEGOTIATION_CONTEXT_AGGREGATOR_MODULE.DeterministicNegotiationContextAggregator()
+    negotiation_strategy_generator = _NEGOTIATION_STRATEGY_GENERATOR_MODULE.DeterministicNegotiationStrategyGenerator()
     return JobIngestionAPI(
         repository=SQLiteJobIngestionRepository(resolved_db_path),
         extraction_worker=extraction_worker,
@@ -2300,6 +2324,7 @@ def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
         progress_aggregator=progress_aggregator,
         trajectory_planner=trajectory_planner,
         negotiation_context_aggregator=negotiation_context_aggregator,
+        negotiation_strategy_generator=negotiation_strategy_generator,
     )
 
 
@@ -2651,6 +2676,283 @@ def _normalize_negotiation_evidence_links(raw_links: Any) -> list[dict[str, str]
         ),
     )
     return normalized[:5] if normalized else _normalize_negotiation_evidence_links(None)
+
+
+def _normalize_negotiation_anchor_band(
+    raw_band: Any,
+    *,
+    compensation_targets: dict[str, Any],
+) -> dict[str, Any]:
+    currency = str(compensation_targets.get("currency", "USD")).strip().upper() or "USD"
+    fallback_floor = compensation_targets.get("walk_away_base_salary")
+    fallback_target = compensation_targets.get("recommended_counter_base_salary")
+    fallback_ceiling = compensation_targets.get("anchor_base_salary")
+    floor = (
+        int(fallback_floor)
+        if isinstance(fallback_floor, int) and not isinstance(fallback_floor, bool) and fallback_floor >= 0
+        else 0
+    )
+    target = (
+        int(fallback_target)
+        if isinstance(fallback_target, int) and not isinstance(fallback_target, bool) and fallback_target >= 0
+        else floor
+    )
+    ceiling = (
+        int(fallback_ceiling)
+        if isinstance(fallback_ceiling, int) and not isinstance(fallback_ceiling, bool) and fallback_ceiling >= 0
+        else max(floor, target)
+    )
+    rationale = (
+        f"Anchor at {ceiling}, target {target}, and hold {floor} as minimum acceptable base salary."
+    )
+
+    if isinstance(raw_band, dict):
+        raw_currency = raw_band.get("currency")
+        if isinstance(raw_currency, str) and raw_currency.strip():
+            currency = raw_currency.strip().upper()
+
+        raw_floor = raw_band.get("floor_base_salary")
+        if isinstance(raw_floor, int) and not isinstance(raw_floor, bool) and raw_floor >= 0:
+            floor = raw_floor
+
+        raw_target = raw_band.get("target_base_salary")
+        if isinstance(raw_target, int) and not isinstance(raw_target, bool) and raw_target >= 0:
+            target = raw_target
+
+        raw_ceiling = raw_band.get("ceiling_base_salary")
+        if isinstance(raw_ceiling, int) and not isinstance(raw_ceiling, bool) and raw_ceiling >= 0:
+            ceiling = raw_ceiling
+
+        raw_rationale = raw_band.get("rationale")
+        if isinstance(raw_rationale, str) and raw_rationale.strip():
+            rationale = raw_rationale.strip()
+
+    floor = _round_compensation_to_500(max(0, floor))
+    ceiling = _round_compensation_to_500(max(floor, ceiling))
+    target = _round_compensation_to_500(max(floor, min(target, ceiling)))
+
+    return {
+        "currency": currency,
+        "floor_base_salary": floor,
+        "target_base_salary": target,
+        "ceiling_base_salary": ceiling,
+        "rationale": rationale,
+    }
+
+
+def _normalize_negotiation_concession_ladder(
+    raw_ladder: Any,
+    *,
+    anchor_band: dict[str, Any],
+    leverage_signals: list[dict[str, Any]],
+    risk_signals: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    floor = int(anchor_band.get("floor_base_salary", 0))
+    target = int(anchor_band.get("target_base_salary", floor))
+    ceiling = int(anchor_band.get("ceiling_base_salary", max(floor, target)))
+
+    normalized: list[dict[str, Any]] = []
+    if isinstance(raw_ladder, list):
+        for raw in raw_ladder:
+            if not isinstance(raw, dict):
+                continue
+            step = raw.get("step")
+            ask = raw.get("ask_base_salary")
+            trigger = str(raw.get("trigger", "")).strip()
+            concession = str(raw.get("concession", "")).strip()
+            exchange_for = str(raw.get("exchange_for", "")).strip()
+            evidence = str(raw.get("evidence", "")).strip()
+            if (
+                not isinstance(step, int)
+                or isinstance(step, bool)
+                or step < 1
+                or not isinstance(ask, int)
+                or isinstance(ask, bool)
+                or ask < 0
+                or not trigger
+                or not concession
+                or not exchange_for
+                or not evidence
+            ):
+                continue
+            normalized.append(
+                {
+                    "step": step,
+                    "ask_base_salary": _round_compensation_to_500(max(floor, min(ask, ceiling))),
+                    "trigger": trigger,
+                    "concession": concession,
+                    "exchange_for": exchange_for,
+                    "evidence": evidence,
+                }
+            )
+
+    if not normalized:
+        midpoint = _round_compensation_to_500(max(target, ceiling - int(round(max(0, ceiling - floor) * 0.45))))
+        asks = [ceiling, midpoint, target]
+        deduped_asks: list[int] = []
+        seen_asks: set[int] = set()
+        for ask in asks:
+            normalized_ask = _round_compensation_to_500(max(floor, min(ask, ceiling)))
+            if normalized_ask in seen_asks:
+                continue
+            seen_asks.add(normalized_ask)
+            deduped_asks.append(normalized_ask)
+        if len(deduped_asks) < 2:
+            deduped_asks.append(floor)
+
+        for index, ask in enumerate(deduped_asks):
+            leverage = leverage_signals[min(index, len(leverage_signals) - 1)] if leverage_signals else {}
+            risk = risk_signals[min(index, len(risk_signals) - 1)] if risk_signals else {}
+            normalized.append(
+                {
+                    "step": index + 1,
+                    "ask_base_salary": ask,
+                    "trigger": f"If employer raises {str(risk.get('signal', 'timeline_risk')).replace('_', ' ')} concerns.",
+                    "concession": "Reduce base ask in controlled increments while preserving role scope.",
+                    "exchange_for": "Written commitments on review timing, level scope, or non-base upside.",
+                    "evidence": str(
+                        leverage.get("evidence", "Use readiness and performance context to justify concessions.")
+                    ),
+                }
+            )
+
+    normalized.sort(key=lambda item: (int(item["step"]), -int(item["ask_base_salary"])))
+    reindexed: list[dict[str, Any]] = []
+    previous_ask: int | None = None
+    for index, entry in enumerate(normalized[:4]):
+        ask_value = int(entry["ask_base_salary"])
+        if previous_ask is not None:
+            ask_value = min(previous_ask, ask_value)
+            ask_value = max(floor, ask_value)
+        previous_ask = ask_value
+        reindexed.append(
+            {
+                "step": index + 1,
+                "ask_base_salary": ask_value,
+                "trigger": str(entry["trigger"]),
+                "concession": str(entry["concession"]),
+                "exchange_for": str(entry["exchange_for"]),
+                "evidence": str(entry["evidence"]),
+            }
+        )
+    return reindexed
+
+
+def _normalize_negotiation_objection_playbook(
+    raw_playbook: Any,
+    *,
+    risk_signals: list[dict[str, Any]],
+    leverage_signals: list[dict[str, Any]],
+    evidence_links: list[dict[str, str]],
+    anchor_band: dict[str, Any],
+) -> list[dict[str, Any]]:
+    severity_rank = {"critical": 3, "high": 2, "medium": 1, "low": 0}
+    normalized: list[dict[str, Any]] = []
+
+    if isinstance(raw_playbook, list):
+        for raw in raw_playbook:
+            if not isinstance(raw, dict):
+                continue
+            risk_signal = str(raw.get("risk_signal", "")).strip()
+            objection = str(raw.get("objection", "")).strip()
+            response = str(raw.get("response", "")).strip()
+            evidence = str(raw.get("evidence", "")).strip()
+            fallback_trade = str(raw.get("fallback_trade", "")).strip()
+            if not risk_signal or not objection or not response or not evidence or not fallback_trade:
+                continue
+            normalized.append(
+                {
+                    "risk_signal": risk_signal,
+                    "objection": objection,
+                    "response": response,
+                    "evidence": evidence,
+                    "fallback_trade": fallback_trade,
+                }
+            )
+
+    if not normalized:
+        ranked_risks = sorted(
+            risk_signals,
+            key=lambda item: (
+                -severity_rank.get(str(item.get("severity", "")).lower(), 0),
+                -float(item.get("score", 0.0)),
+                str(item.get("signal", "")),
+            ),
+        )
+        if not ranked_risks:
+            ranked_risks = [
+                {
+                    "signal": "timeline_risk",
+                    "severity": "medium",
+                    "score": 45.0,
+                    "evidence": "Offer timeline uncertainty requires active risk management.",
+                }
+            ]
+
+        for index, risk in enumerate(ranked_risks[:3]):
+            leverage = leverage_signals[min(index, len(leverage_signals) - 1)] if leverage_signals else {}
+            evidence_link = evidence_links[min(index, len(evidence_links) - 1)] if evidence_links else {}
+            signal_label = str(risk.get("signal", "timeline_risk")).replace("_", " ")
+            normalized.append(
+                {
+                    "risk_signal": str(risk.get("signal", "timeline_risk")),
+                    "objection": f"We have constraints related to {signal_label}.",
+                    "response": (
+                        f"Address {signal_label} directly and tie the ask to "
+                        f"{str(leverage.get('signal', 'performance momentum')).replace('_', ' ')} outcomes."
+                    ),
+                    "evidence": (
+                        f"{str(risk.get('evidence', '')).strip()} "
+                        f"Source {str(evidence_link.get('source_type', 'offer_input'))}:"
+                        f"{str(evidence_link.get('source_id', 'candidate'))}."
+                    ).strip(),
+                    "fallback_trade": (
+                        f"If base cannot move, hold floor at {int(anchor_band.get('floor_base_salary', 0))} "
+                        "and request non-base upside with timeline guarantees."
+                    ),
+                }
+            )
+
+    return normalized[:3]
+
+
+def _normalize_negotiation_talking_points(
+    raw_points: Any,
+    *,
+    anchor_band: dict[str, Any],
+    leverage_signals: list[dict[str, Any]],
+    risk_signals: list[dict[str, Any]],
+) -> list[str]:
+    if isinstance(raw_points, list):
+        normalized: list[str] = []
+        for raw in raw_points:
+            if not isinstance(raw, str):
+                continue
+            point = raw.strip()
+            if not point:
+                continue
+            normalized.append(point)
+        if normalized:
+            return normalized[:5]
+
+    lead_leverage = (
+        str(leverage_signals[0].get("signal", "")).replace("_", " ")
+        if leverage_signals
+        else "performance momentum"
+    )
+    lead_risk = (
+        str(risk_signals[0].get("signal", "")).replace("_", " ")
+        if risk_signals
+        else "timeline pressure"
+    )
+    return [
+        f"Anchor at {int(anchor_band.get('ceiling_base_salary', 0))} with evidence from {lead_leverage}.",
+        (
+            f"Protect minimum floor of {int(anchor_band.get('floor_base_salary', 0))} and trade concessions only "
+            "for explicit commitments."
+        ),
+        f"Pre-handle {lead_risk} objections before discussing compensation movement.",
+    ]
 
 
 def _validate_append_interview_response_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
