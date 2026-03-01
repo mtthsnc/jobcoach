@@ -1678,3 +1678,56 @@ Use UTC timestamps. Append entries only.
   - Full `make contract-test` currently fails on two non-M6 contract tests in this environment; M6-002-specific contract and schema checks pass.
 - Next pointer:
   - Execute `M6-003` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T00:13:12Z
+- Execute `M6-003` deterministic negotiation strategy generator.
+- Task IDs: M6-003
+- Changes made:
+  - Started implementation of deterministic strategy synthesis (`anchor_band`, concession ladder, objection playbook) from normalized negotiation context signals.
+- Validation evidence:
+  - Planned: unit/schema/contract coverage and full make validation gates.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete `M6-003` and advance pointer to `M6-004`.
+
+- END
+- 2026-03-01T00:26:25Z
+- Execute `M6-003` deterministic negotiation strategy generator.
+- Task IDs: M6-003
+- Changes made:
+  - Added deterministic strategy synthesis module `services/negotiation-planning/generator.py` to derive structured negotiation tactics from context signals and evidence links.
+  - Integrated strategy generation into negotiation payload construction in `apps/api-gateway/api_gateway/app.py`:
+    - wired module loading/dependency injection in `create_app`,
+    - generated and normalized `anchor_band`, `concession_ladder`, and `objection_playbook`,
+    - updated `strategy_summary`/`talking_points` synthesis to flow from deterministic strategy output.
+  - Extended contracts:
+    - `schemas/openapi/openapi-m0-m2.yaml`: expanded `NegotiationPlan` with required `anchor_band`, `concession_ladder`, and `objection_playbook` fields.
+    - `schemas/jsonschema/core-schemas.json`: mirrored schema additions and bounds for strategy structures.
+  - Added deterministic fixture coverage:
+    - `tests/unit/fixtures/negotiation_strategy/benchmark_*.json`
+    - `tests/unit/test_negotiation_strategy_generator.py`
+  - Extended unit/contract/schema tests:
+    - `tests/unit/test_job_spec_persistence.py`: negotiation strategy field presence, ordering, and deterministic stability assertions.
+    - `tests/contracts/test_job_ingestions_api_contract.py`: contract assertions and persistence checks for structured strategy fields.
+    - negotiation schema fixtures updated under `tests/contracts/fixtures/schema_validation`.
+  - Updated planning artifacts:
+    - Marked `M6-003` as `DONE` in `docs/tasklist.md`.
+    - Advanced `docs/NEXT_ACTION.md` pointer to `M6-004`.
+    - Added decision `DEC-013` in `docs/decision-log.md`.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_negotiation_strategy_generator.py`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/contracts/test_schema_validation.py`
+  - `make validate-openapi`
+  - `MIGRATE_DB_PATH=.tmp/m6-003-make-up.sqlite3 make migrate-up`
+  - `MIGRATE_DB_PATH=.tmp/m6-003-make-down.sqlite3 make migrate-down`
+  - `MIGRATE_DB_PATH=.tmp/m6-003-smoke-seq.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh up`
+  - `MIGRATE_DB_PATH=.tmp/m6-003-smoke-seq.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh down`
+  - `PYTHONDONTWRITEBYTECODE=1 make test`
+  - `make contract-test` (fails with pre-existing non-M6 contract failures in this environment, including `test_append_interview_response_contract_with_idempotency` plus a second non-M6 test that varied across reruns)
+- Blockers / risks:
+  - Full `make contract-test` remains unstable with two non-M6 failures; M6-003-specific negotiation strategy contract and schema checks pass.
+- Next pointer:
+  - Execute `M6-004` from `docs/NEXT_ACTION.md`.

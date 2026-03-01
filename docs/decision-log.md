@@ -156,3 +156,15 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Keep negotiation context logic embedded directly in API handlers without a dedicated module.
   - Keep only free-form talking points without explicit leverage/risk/evidence structures in schema contracts.
+
+- Decision ID: `DEC-013`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: M6-003 required deterministic synthesis of negotiation tactics from normalized context signals so strategy outputs remain stable across idempotent regeneration and contract validation.
+- Decision: Introduce a dedicated deterministic negotiation strategy generator and persist structured strategy fields on `NegotiationPlan` (`anchor_band`, `concession_ladder`, `objection_playbook`) with explicit schema contracts and fixture-driven tests.
+- Consequences:
+  - Negotiation strategy outputs are now reproducible for fixed context histories and auditable through explicit evidence-bearing strategy structures.
+  - Contract/core schema surface area increased, requiring downstream M6-004 follow-up planning to integrate with the new strategy blocks.
+- Alternatives considered:
+  - Keep strategy derivation inline in API handlers without a dedicated module.
+  - Keep only free-form `strategy_summary` and talking points without structured ladder/playbook contracts.
