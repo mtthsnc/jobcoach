@@ -29,6 +29,7 @@ PROGRESS_AGGREGATOR_PATH = ROOT_DIR / "services" / "progress-tracking" / "aggreg
 TRAJECTORY_PLANNER_PATH = ROOT_DIR / "services" / "trajectory-planning" / "generator.py"
 NEGOTIATION_CONTEXT_AGGREGATOR_PATH = ROOT_DIR / "services" / "negotiation-planning" / "aggregator.py"
 NEGOTIATION_STRATEGY_GENERATOR_PATH = ROOT_DIR / "services" / "negotiation-planning" / "generator.py"
+NEGOTIATION_FOLLOWUP_PLANNER_PATH = ROOT_DIR / "services" / "negotiation-planning" / "followup.py"
 INTERVIEW_ROUTE_PREFIX = "/v1/interview-sessions/"
 INTERVIEW_RESPONSES_SUFFIX = "/responses"
 FEEDBACK_ROUTE_PREFIX = "/v1/feedback-reports/"
@@ -86,6 +87,10 @@ _NEGOTIATION_STRATEGY_GENERATOR_MODULE = _load_module(
     "negotiation_strategy_generator",
     NEGOTIATION_STRATEGY_GENERATOR_PATH,
 )
+_NEGOTIATION_FOLLOWUP_PLANNER_MODULE = _load_module(
+    "negotiation_followup_planner",
+    NEGOTIATION_FOLLOWUP_PLANNER_PATH,
+)
 
 
 class JobIngestionAPI:
@@ -104,6 +109,7 @@ class JobIngestionAPI:
         trajectory_planner: Any,
         negotiation_context_aggregator: Any,
         negotiation_strategy_generator: Any,
+        negotiation_followup_planner: Any,
     ) -> None:
         self._repository = repository
         self._extraction_worker = extraction_worker
@@ -117,6 +123,7 @@ class JobIngestionAPI:
         self._trajectory_planner = trajectory_planner
         self._negotiation_context_aggregator = negotiation_context_aggregator
         self._negotiation_strategy_generator = negotiation_strategy_generator
+        self._negotiation_followup_planner = negotiation_followup_planner
 
     def __call__(self, environ: dict[str, Any], start_response: Any) -> list[bytes]:
         method = str(environ.get("REQUEST_METHOD", "")).upper()
@@ -2271,6 +2278,30 @@ class JobIngestionAPI:
                 f"hold floor at {anchor_band.get('floor_base_salary', walk_away_base_salary)}, and pre-handle {lead_risk}."
             )
 
+        offer_deadline_date = request_payload.get("offer_deadline_date")
+        offer_deadline_text = offer_deadline_date.strip() if isinstance(offer_deadline_date, str) and offer_deadline_date.strip() else None
+        generated_follow_up = self._negotiation_followup_planner.generate(
+            target_role=target_role,
+            strategy_summary=strategy_summary,
+            anchor_band=anchor_band,
+            concession_ladder=concession_ladder,
+            leverage_signals=leverage_signals,
+            risk_signals=risk_signals,
+            evidence_links=evidence_links,
+        )
+        follow_up_plan = _normalize_negotiation_follow_up_plan(
+            generated_follow_up.get("follow_up_plan"),
+            target_role=target_role,
+            strategy_summary=strategy_summary,
+            anchor_band=anchor_band,
+            leverage_signals=leverage_signals,
+            risk_signals=risk_signals,
+        )
+        follow_up_actions = _normalize_negotiation_follow_up_actions(
+            generated_follow_up.get("follow_up_actions"),
+            follow_up_plan=follow_up_plan,
+        )
+
         payload: dict[str, Any] = {
             "negotiation_plan_id": f"np_{uuid4().hex}",
             "candidate_id": candidate_id,
@@ -2284,26 +2315,13 @@ class JobIngestionAPI:
             "concession_ladder": concession_ladder,
             "objection_playbook": objection_playbook,
             "talking_points": talking_points,
-            "follow_up_actions": [
-                {
-                    "day_offset": 0,
-                    "action": "Send same-day thank-you note reinforcing top value proposition and enthusiasm.",
-                },
-                {
-                    "day_offset": 2,
-                    "action": "Share concise accomplishment bullets tied to role outcomes and compensation rationale.",
-                },
-                {
-                    "day_offset": 5,
-                    "action": "Request next-step timeline clarity and confirm decision window for offer response.",
-                },
-            ],
+            "follow_up_plan": follow_up_plan,
+            "follow_up_actions": follow_up_actions,
             "generated_at": _utc_timestamp(),
         }
 
-        offer_deadline_date = request_payload.get("offer_deadline_date")
-        if isinstance(offer_deadline_date, str) and offer_deadline_date.strip():
-            payload["offer_deadline_date"] = offer_deadline_date.strip()
+        if offer_deadline_text:
+            payload["offer_deadline_date"] = offer_deadline_text
 
         return payload
 
@@ -2456,6 +2474,7 @@ def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
     trajectory_planner = _TRAJECTORY_PLANNER_MODULE.DeterministicTrajectoryPlanner()
     negotiation_context_aggregator = _NEGOTIATION_CONTEXT_AGGREGATOR_MODULE.DeterministicNegotiationContextAggregator()
     negotiation_strategy_generator = _NEGOTIATION_STRATEGY_GENERATOR_MODULE.DeterministicNegotiationStrategyGenerator()
+    negotiation_followup_planner = _NEGOTIATION_FOLLOWUP_PLANNER_MODULE.DeterministicNegotiationFollowupPlanner()
     return JobIngestionAPI(
         repository=SQLiteJobIngestionRepository(resolved_db_path),
         extraction_worker=extraction_worker,
@@ -2469,6 +2488,7 @@ def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
         trajectory_planner=trajectory_planner,
         negotiation_context_aggregator=negotiation_context_aggregator,
         negotiation_strategy_generator=negotiation_strategy_generator,
+        negotiation_followup_planner=negotiation_followup_planner,
     )
 
 
@@ -3111,6 +3131,270 @@ def _normalize_negotiation_talking_points(
         ),
         f"Pre-handle {lead_risk} objections before discussing compensation movement.",
     ]
+
+
+def _normalize_negotiation_follow_up_plan(
+    raw_plan: Any,
+    *,
+    target_role: str,
+    strategy_summary: str,
+    anchor_band: dict[str, Any],
+    leverage_signals: list[dict[str, Any]],
+    risk_signals: list[dict[str, Any]],
+) -> dict[str, Any]:
+    role_label = target_role.strip() or "target role"
+    lead_leverage = (
+        str(leverage_signals[0].get("signal", "")).replace("_", " ")
+        if leverage_signals
+        else "performance momentum"
+    )
+    lead_risk = (
+        str(risk_signals[0].get("signal", "")).replace("_", " ")
+        if risk_signals
+        else "timeline pressure"
+    )
+    target_comp = int(anchor_band.get("target_base_salary", 0))
+
+    default_thank_you = {
+        "send_by_day_offset": 0,
+        "subject": f"Thank you - {role_label} discussion follow-up",
+        "body": (
+            f"Thank you for the discussion about the {role_label} opportunity. "
+            f"{strategy_summary or 'I remain excited about the role and confident in delivery outcomes.'}"
+        ),
+        "key_points": [
+            f"Reinforce {lead_leverage} outcomes tied to role scope.",
+            f"Reference compensation rationale around {target_comp}.",
+            f"Address {lead_risk} concerns with a clear timeline request.",
+        ],
+    }
+    default_cadence = [
+        {
+            "day_offset": 0,
+            "channel": "email",
+            "objective": "Reinforce value and alignment",
+            "message": f"Thank recruiter and recap {lead_leverage} outcomes tied to {role_label}.",
+        },
+        {
+            "day_offset": 2,
+            "channel": "email",
+            "objective": "Share concise supporting evidence",
+            "message": "Send a compact evidence addendum linked to negotiation rationale.",
+        },
+        {
+            "day_offset": 5,
+            "channel": "phone",
+            "objective": "Confirm decision timeline",
+            "message": f"Ask for next checkpoint and clarify how {lead_risk} concerns are resolved.",
+        },
+    ]
+    default_branches = [
+        {
+            "outcome": "positive_signal",
+            "actions": [
+                {"day_offset": 0, "action": "Confirm verbal alignment and request written offer details."},
+                {"day_offset": 1, "action": "Validate compensation components and acceptance timeline."},
+            ],
+        },
+        {
+            "outcome": "needs_approval",
+            "actions": [
+                {"day_offset": 1, "action": "Provide approver-focused evidence summary."},
+                {"day_offset": 3, "action": "Schedule an approval checkpoint with recruiter."},
+            ],
+        },
+        {
+            "outcome": "stalled_or_pushback",
+            "actions": [
+                {"day_offset": 2, "action": "Respond with bounded concession options and exchange terms."},
+                {"day_offset": 5, "action": "Escalate fallback trade package (scope/review/non-base upside)."},
+            ],
+        },
+    ]
+
+    if not isinstance(raw_plan, dict):
+        return {
+            "thank_you_note": default_thank_you,
+            "recruiter_cadence": default_cadence,
+            "outcome_branches": default_branches,
+        }
+
+    thank_you_note = dict(default_thank_you)
+    raw_note = raw_plan.get("thank_you_note")
+    if isinstance(raw_note, dict):
+        send_by = raw_note.get("send_by_day_offset")
+        if isinstance(send_by, int) and not isinstance(send_by, bool) and 0 <= send_by <= 14:
+            thank_you_note["send_by_day_offset"] = send_by
+        subject = raw_note.get("subject")
+        if isinstance(subject, str) and subject.strip():
+            thank_you_note["subject"] = _sanitize_negotiation_template_text(subject)
+        body = raw_note.get("body")
+        if isinstance(body, str) and body.strip():
+            thank_you_note["body"] = _sanitize_negotiation_template_text(body)
+        raw_key_points = raw_note.get("key_points")
+        if isinstance(raw_key_points, list):
+            key_points: list[str] = []
+            for item in raw_key_points:
+                if not isinstance(item, str) or not item.strip():
+                    continue
+                key_points.append(_sanitize_negotiation_template_text(item))
+            if key_points:
+                thank_you_note["key_points"] = key_points[:5]
+
+    cadence: list[dict[str, Any]] = []
+    raw_cadence = raw_plan.get("recruiter_cadence")
+    if isinstance(raw_cadence, list):
+        for item in raw_cadence:
+            if not isinstance(item, dict):
+                continue
+            day_offset = item.get("day_offset")
+            channel = str(item.get("channel", "")).strip().lower()
+            objective = str(item.get("objective", "")).strip()
+            message = str(item.get("message", "")).strip()
+            if (
+                not isinstance(day_offset, int)
+                or isinstance(day_offset, bool)
+                or day_offset < 0
+                or day_offset > 30
+                or channel not in {"email", "phone", "linkedin"}
+                or not objective
+                or not message
+            ):
+                continue
+            cadence.append(
+                {
+                    "day_offset": day_offset,
+                    "channel": channel,
+                    "objective": _sanitize_negotiation_template_text(objective),
+                    "message": _sanitize_negotiation_template_text(message),
+                }
+            )
+    if not cadence:
+        cadence = default_cadence
+    cadence.sort(key=lambda item: (int(item["day_offset"]), str(item["channel"]), str(item["objective"])))
+
+    branch_order = {"positive_signal": 0, "needs_approval": 1, "stalled_or_pushback": 2}
+    branches: list[dict[str, Any]] = []
+    raw_branches = raw_plan.get("outcome_branches")
+    if isinstance(raw_branches, list):
+        for branch in raw_branches:
+            if not isinstance(branch, dict):
+                continue
+            outcome = str(branch.get("outcome", "")).strip()
+            if not outcome:
+                continue
+            actions: list[dict[str, Any]] = []
+            raw_actions = branch.get("actions")
+            if isinstance(raw_actions, list):
+                for raw_action in raw_actions:
+                    if not isinstance(raw_action, dict):
+                        continue
+                    day_offset = raw_action.get("day_offset")
+                    action = str(raw_action.get("action", "")).strip()
+                    if (
+                        not isinstance(day_offset, int)
+                        or isinstance(day_offset, bool)
+                        or day_offset < 0
+                        or day_offset > 30
+                        or not action
+                    ):
+                        continue
+                    actions.append(
+                        {
+                            "day_offset": day_offset,
+                            "action": _sanitize_negotiation_template_text(action),
+                        }
+                    )
+            if actions:
+                actions.sort(key=lambda item: (int(item["day_offset"]), str(item["action"])))
+                branches.append({"outcome": outcome, "actions": actions[:5]})
+
+    if not branches:
+        branches = default_branches
+
+    branches.sort(key=lambda item: (branch_order.get(str(item.get("outcome")), 99), str(item.get("outcome"))))
+    return {
+        "thank_you_note": thank_you_note,
+        "recruiter_cadence": cadence[:6],
+        "outcome_branches": branches[:4],
+    }
+
+
+def _normalize_negotiation_follow_up_actions(
+    raw_actions: Any,
+    *,
+    follow_up_plan: dict[str, Any],
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    if isinstance(raw_actions, list):
+        for item in raw_actions:
+            if not isinstance(item, dict):
+                continue
+            day_offset = item.get("day_offset")
+            action = str(item.get("action", "")).strip()
+            if (
+                not isinstance(day_offset, int)
+                or isinstance(day_offset, bool)
+                or day_offset < 0
+                or day_offset > 30
+                or not action
+            ):
+                continue
+            normalized.append(
+                {
+                    "day_offset": day_offset,
+                    "action": _sanitize_negotiation_template_text(action),
+                }
+            )
+
+    if not normalized:
+        cadence = follow_up_plan.get("recruiter_cadence")
+        if isinstance(cadence, list):
+            for item in cadence:
+                if not isinstance(item, dict):
+                    continue
+                day_offset = item.get("day_offset")
+                objective = str(item.get("objective", "")).strip()
+                message = str(item.get("message", "")).strip()
+                if (
+                    not isinstance(day_offset, int)
+                    or isinstance(day_offset, bool)
+                    or day_offset < 0
+                    or day_offset > 30
+                    or not objective
+                    or not message
+                ):
+                    continue
+                normalized.append(
+                    {
+                        "day_offset": day_offset,
+                        "action": _sanitize_negotiation_template_text(f"{objective}. {message}"),
+                    }
+                )
+
+    if not normalized:
+        normalized = [
+            {
+                "day_offset": 0,
+                "action": "Send same-day thank-you note reinforcing top value proposition and enthusiasm.",
+            },
+            {
+                "day_offset": 2,
+                "action": "Share concise accomplishment bullets tied to role outcomes and compensation rationale.",
+            },
+            {
+                "day_offset": 5,
+                "action": "Request next-step timeline clarity and confirm decision window for offer response.",
+            },
+        ]
+
+    normalized.sort(key=lambda item: (int(item["day_offset"]), str(item["action"])))
+    return normalized[:10]
+
+
+def _sanitize_negotiation_template_text(raw_text: str) -> str:
+    cleaned = str(raw_text).replace("{", "").replace("}", "").strip()
+    return cleaned or "Follow-up message"
 
 
 def _validate_append_interview_response_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
