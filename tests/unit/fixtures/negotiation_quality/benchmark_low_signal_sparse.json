@@ -1,0 +1,30 @@
+{
+  "case_id": "low_signal_sparse",
+  "candidate_id": "cand_neg_quality_003",
+  "target_role": "Associate Engineer",
+  "request_payload": {
+    "candidate_id": "cand_neg_quality_003",
+    "target_role": "Associate Engineer",
+    "current_base_salary": 122000,
+    "compensation_currency": "USD"
+  },
+  "candidate_profile": {
+    "candidate_id": "cand_neg_quality_003",
+    "skills": {
+      "skill.communication": 0.52
+    }
+  },
+  "interview_sessions": [],
+  "feedback_reports": [],
+  "latest_trajectory_plan": null,
+  "expectations": {
+    "top_leverage_signal": "trajectory_readiness",
+    "top_risk_signal": "momentum_volatility",
+    "cadence_offsets": [0, 2, 5],
+    "branch_order": ["positive_signal", "needs_approval", "stalled_or_pushback"],
+    "max_action_day_offset": 10,
+    "min_evidence_links": 2,
+    "min_evidence_reference_ratio": 0.5,
+    "evidence_source_order_prefix": ["offer_input", "candidate_profile"]
+  }
+}
