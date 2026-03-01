@@ -172,6 +172,47 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertTrue(job_spec_id)
         return ingestion_id, job_spec_id
 
+    def _create_job_spec_from_url(self) -> tuple[str, str]:
+        fixture_path = Path(self._tmpdir.name) / "job-posting.html"
+        fixture_path.write_text(
+            "<html><body>"
+            "<h1>AI Automation Lead</h1>"
+            "<h2>Responsibilities</h2>"
+            "<ul><li>Build automation workflows</li><li>Own AI operations</li></ul>"
+            "<h2>Requirements</h2>"
+            "<ul><li>Python</li><li>SQL</li></ul>"
+            "</body></html>",
+            encoding="utf-8",
+        )
+
+        status, _, create_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/job-ingestions",
+            body={
+                "source_type": "url",
+                "source_value": fixture_path.resolve().as_uri(),
+            },
+            headers={"Idempotency-Key": "persist-job-spec-url-001"},
+        )
+
+        self.assertEqual(status, 202, create_body)
+        ingestion_id = create_body["data"]["ingestion_id"]
+        self.assertTrue(ingestion_id)
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            ingestion_row = conn.execute(
+                "SELECT result_job_spec_id FROM job_ingestions WHERE ingestion_id = ?",
+                (ingestion_id,),
+            ).fetchone()
+
+        self.assertIsNotNone(ingestion_row)
+        assert ingestion_row is not None
+        job_spec_id = ingestion_row[0]
+        self.assertIsInstance(job_spec_id, str)
+        self.assertTrue(job_spec_id)
+        return ingestion_id, job_spec_id
+
     def _create_candidate_profile(self) -> tuple[str, str]:
         create_status, _, create_body = _request(
             self.app,
@@ -228,6 +269,23 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertGreaterEqual(job_spec_payload["extraction_confidence"], 0)
         self.assertLessEqual(job_spec_payload["extraction_confidence"], 1)
         self.assertGreater(len(job_spec_payload["responsibilities"]), 0)
+
+    def test_job_spec_from_url_persisted_and_retrievable(self) -> None:
+        _, job_spec_id = self._create_job_spec_from_url()
+
+        get_status, _, get_body = _request(
+            self.app,
+            method="GET",
+            path=f"/v1/job-specs/{job_spec_id}",
+        )
+
+        self.assertEqual(get_status, 200, get_body)
+        self.assertIsNone(get_body["error"])
+
+        job_spec_payload = get_body["data"]
+        self.assertEqual(job_spec_payload["source"]["type"], "url")
+        self.assertEqual(job_spec_payload["role_title"], "AI Automation Lead")
+        self.assertIn("Build automation workflows", job_spec_payload["responsibilities"])
 
     def test_patch_job_spec_review_success_persists_audit_row(self) -> None:
         _, job_spec_id = self._create_job_spec()

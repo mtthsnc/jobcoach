@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 from datetime import datetime, timezone
 from http import HTTPStatus
 from pathlib import Path
@@ -511,7 +512,7 @@ class JobIngestionAPI:
                 ),
             )
 
-        if source_type == "text" and not existing_record.result_job_spec_id:
+        if source_type in {"text", "url"} and not existing_record.result_job_spec_id:
             job_spec_payload = self._build_job_spec_payload(existing_record)
             validation = self._schema_validator.validate("JobSpec", job_spec_payload)
             if not validation.is_valid:
@@ -1880,9 +1881,14 @@ class JobIngestionAPI:
         extracted = self._extraction_worker.extract(source_type=record.source_type, source_value=record.source_value)
         sections = _sections_by_id(extracted.sections)
 
-        responsibilities = _collect_lines(sections, preferred_keys=("responsibilities", "overview"))
+        responsibilities = _collect_lines(sections, preferred_keys=("responsibilities",))
+        if not responsibilities:
+            responsibilities = _collect_lines(sections, preferred_keys=("overview",))
         if not responsibilities:
             responsibilities = [extracted.role_title]
+        responsibilities = [
+            line for line in responsibilities if line.strip().lower() != extracted.role_title.strip().lower()
+        ] or [extracted.role_title]
 
         required_lines = _collect_lines(sections, preferred_keys=("requirements",))
         preferred_lines = _collect_lines(sections, preferred_keys=("preferred_qualifications",))
@@ -3396,7 +3402,9 @@ def _extract_skill_terms(lines: list[str], normalizer: Any) -> list[str]:
 
     matched: list[str] = []
     for line in lines:
-        normalized_line = re.sub(r"[^a-z0-9\s]+", " ", line.lower())
+        normalized_line = unicodedata.normalize("NFKD", line)
+        normalized_line = normalized_line.encode("ascii", "ignore").decode("ascii")
+        normalized_line = re.sub(r"[^a-z0-9\s]+", " ", normalized_line.lower())
         normalized_line = re.sub(r"\s+", " ", normalized_line).strip()
         for alias in aliases:
             if re.search(rf"(^|\s){re.escape(alias)}(\s|$)", normalized_line):
@@ -3411,6 +3419,23 @@ def _extract_skill_terms(lines: list[str], normalizer: Any) -> list[str]:
         for part in parts:
             cleaned = _clean_line(part)
             if cleaned:
+                normalized = unicodedata.normalize("NFKD", cleaned)
+                normalized = normalized.encode("ascii", "ignore").decode("ascii")
+                normalized = re.sub(r"[^a-z0-9\s]+", " ", normalized.lower())
+                normalized = re.sub(r"\s+", " ", normalized).strip()
+                words = normalized.split()
+                if not words:
+                    continue
+                if normalized in {
+                    "hvem er du",
+                    "vi forestiller os",
+                    "du er ikke nodvendigvis udvikler men du",
+                }:
+                    continue
+                if len(words) > 3:
+                    continue
+                if "og" in words and len(words) > 2:
+                    continue
                 fallback_terms.append(cleaned)
 
     return _unique_preserving_order(fallback_terms)
@@ -3433,18 +3458,24 @@ def _competency_weights(required_terms: tuple[Any, ...], preferred_terms: tuple[
     weights: dict[str, float] = {}
 
     for term in required_terms:
-        if not bool(getattr(term, "is_known", False)):
-            continue
         canonical_id = str(getattr(term, "canonical_id", "")).strip()
-        if canonical_id:
+        is_known = bool(getattr(term, "is_known", False))
+        if not canonical_id:
+            continue
+        if is_known:
             weights[canonical_id] = 1.0
+        elif canonical_id.startswith("skill.freeform."):
+            weights[canonical_id] = max(weights.get(canonical_id, 0.0), 0.55)
 
     for term in preferred_terms:
-        if not bool(getattr(term, "is_known", False)):
-            continue
         canonical_id = str(getattr(term, "canonical_id", "")).strip()
-        if canonical_id:
+        is_known = bool(getattr(term, "is_known", False))
+        if not canonical_id:
+            continue
+        if is_known:
             weights[canonical_id] = max(weights.get(canonical_id, 0.0), 0.65)
+        elif canonical_id.startswith("skill.freeform."):
+            weights[canonical_id] = max(weights.get(canonical_id, 0.0), 0.4)
 
     return weights
 
