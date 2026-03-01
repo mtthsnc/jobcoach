@@ -36,6 +36,7 @@ NEGOTIATION_ROUTE_PREFIX = "/v1/negotiation-plans/"
 TRAJECTORY_ROUTE_PREFIX = "/v1/trajectory-plans/"
 JOB_SPEC_ROUTE_PREFIX = "/v1/job-specs/"
 JOB_SPEC_REVIEW_ROUTE_SUFFIX = "/review"
+COMPETENCY_FIT_ROUTE = "/v1/competency-fits"
 CANDIDATE_ROUTE_PREFIX = "/v1/candidates/"
 CANDIDATE_PROFILE_SUFFIX = "/profile"
 CANDIDATE_STORYBANK_SUFFIX = "/storybank"
@@ -175,6 +176,16 @@ class JobIngestionAPI:
                     headers=[("Allow", "GET")],
                 )
             return self._handle_get_candidate(start_response, request_id=request_id, ingestion_id=ingestion_id)
+
+        if path == COMPETENCY_FIT_ROUTE:
+            if method != "POST":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "POST")],
+                )
+            return self._handle_create_competency_fit(environ, start_response, request_id=request_id)
 
         if path == "/v1/interview-sessions":
             if method != "POST":
@@ -719,6 +730,82 @@ class JobIngestionAPI:
                 request_id=request_id,
                 data=_candidate_status_payload(record),
             ),
+        )
+
+    def _handle_create_competency_fit(
+        self,
+        environ: dict[str, Any],
+        start_response: Any,
+        *,
+        request_id: str,
+    ) -> list[bytes]:
+        payload, payload_error = _parse_json_payload(environ)
+        if payload_error:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message=payload_error,
+                    retryable=False,
+                ),
+            )
+
+        validation_errors = _validate_create_competency_fit_payload(payload)
+        if validation_errors:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Request body validation failed",
+                    retryable=False,
+                    details=validation_errors,
+                ),
+            )
+
+        job_spec_id = str(payload["job_spec_id"]).strip()
+        candidate_id = str(payload["candidate_id"]).strip()
+
+        job_spec = self._repository.get_job_spec_by_id(job_spec_id)
+        if job_spec is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Job spec not found",
+                    retryable=False,
+                ),
+            )
+
+        candidate_profile = self._repository.get_candidate_profile_by_id(candidate_id)
+        if candidate_profile is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Candidate profile not found",
+                    retryable=False,
+                ),
+            )
+
+        fit_payload = self._build_competency_fit_payload(
+            job_spec_id=job_spec_id,
+            candidate_id=candidate_id,
+            job_spec=job_spec,
+            candidate_profile=candidate_profile,
+        )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.OK,
+            _success_envelope(request_id=request_id, data=fit_payload),
         )
 
     def _handle_get_candidate_profile(self, start_response: Any, *, request_id: str, candidate_id: str) -> list[bytes]:
@@ -2304,6 +2391,57 @@ class JobIngestionAPI:
             "latest_trajectory_plan": latest_trajectory_metadata,
         }
 
+    def _build_competency_fit_payload(
+        self,
+        *,
+        job_spec_id: str,
+        candidate_id: str,
+        job_spec: dict[str, Any],
+        candidate_profile: dict[str, Any],
+    ) -> dict[str, Any]:
+        required_weights = _resolve_job_required_competency_weights(
+            job_spec=job_spec,
+            taxonomy_normalizer=self._taxonomy_normalizer,
+        )
+        candidate_scores = _resolve_candidate_competency_scores(
+            candidate_profile=candidate_profile,
+            taxonomy_normalizer=self._taxonomy_normalizer,
+        )
+
+        competencies: list[dict[str, Any]] = []
+        total_required = 0.0
+        total_covered = 0.0
+
+        for competency_id, required_weight in sorted(required_weights.items()):
+            candidate_score = max(0.0, min(1.0, float(candidate_scores.get(competency_id, 0.0))))
+            gap = max(0.0, required_weight - candidate_score)
+            fit_ratio = 1.0 if required_weight <= 0.0 else min(1.0, candidate_score / required_weight)
+            total_required += required_weight
+            total_covered += min(required_weight, candidate_score)
+            competencies.append(
+                {
+                    "competency": competency_id,
+                    "required_weight": round(required_weight, 3),
+                    "candidate_score": round(candidate_score, 3),
+                    "gap": round(gap, 3),
+                    "fit_ratio": round(fit_ratio, 3),
+                }
+            )
+
+        overall_fit_score = 0.0 if total_required <= 0.0 else round((total_covered / total_required) * 100.0, 2)
+        covered_count = len([item for item in competencies if item["candidate_score"] > 0.0])
+        coverage_ratio = 0.0 if not competencies else round(covered_count / len(competencies), 3)
+        top_gaps = sorted(competencies, key=lambda item: (-float(item["gap"]), str(item["competency"])))[:5]
+
+        return {
+            "job_spec_id": job_spec_id,
+            "candidate_id": candidate_id,
+            "overall_fit_score": overall_fit_score,
+            "coverage_ratio": coverage_ratio,
+            "competencies": competencies,
+            "top_gaps": top_gaps,
+        }
+
 
 def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
     resolved_db_path = db_path or os.environ.get("JOBCOACH_DB_PATH") or ".tmp/migrate-local.sqlite3"
@@ -2426,6 +2564,20 @@ def _validate_create_candidate_payload(payload: dict[str, Any]) -> list[dict[str
     target_locale = payload.get("target_locale")
     if target_locale is not None and (not isinstance(target_locale, str) or not target_locale):
         errors.append({"field": "target_locale", "reason": "must be a non-empty string when provided"})
+
+    return errors
+
+
+def _validate_create_competency_fit_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+
+    job_spec_id = payload.get("job_spec_id")
+    if not isinstance(job_spec_id, str) or not job_spec_id.strip():
+        errors.append({"field": "job_spec_id", "reason": "must be a non-empty string"})
+
+    candidate_id = payload.get("candidate_id")
+    if not isinstance(candidate_id, str) or not candidate_id.strip():
+        errors.append({"field": "candidate_id", "reason": "must be a non-empty string"})
 
     return errors
 
@@ -3478,6 +3630,78 @@ def _competency_weights(required_terms: tuple[Any, ...], preferred_terms: tuple[
             weights[canonical_id] = max(weights.get(canonical_id, 0.0), 0.4)
 
     return weights
+
+
+def _resolve_job_required_competency_weights(*, job_spec: dict[str, Any], taxonomy_normalizer: Any) -> dict[str, float]:
+    resolved: dict[str, float] = {}
+
+    raw_weights = job_spec.get("competency_weights")
+    if isinstance(raw_weights, dict):
+        for raw_key, raw_value in raw_weights.items():
+            competency_id = str(raw_key).strip()
+            if not competency_id:
+                continue
+            if not isinstance(raw_value, (int, float)) or isinstance(raw_value, bool):
+                continue
+            resolved[competency_id] = max(0.0, min(1.0, float(raw_value)))
+
+    requirements = job_spec.get("requirements")
+    if not isinstance(requirements, dict):
+        return resolved
+
+    required_skills = requirements.get("required_skills")
+    if isinstance(required_skills, list):
+        for value in required_skills:
+            if not isinstance(value, str) or not value.strip():
+                continue
+            normalized = taxonomy_normalizer.normalize_term(value)
+            competency_id = str(getattr(normalized, "canonical_id", "")).strip()
+            if not competency_id:
+                continue
+            default_weight = 1.0 if bool(getattr(normalized, "is_known", False)) else 0.55
+            resolved[competency_id] = max(resolved.get(competency_id, 0.0), default_weight)
+
+    preferred_skills = requirements.get("preferred_skills")
+    if isinstance(preferred_skills, list):
+        for value in preferred_skills:
+            if not isinstance(value, str) or not value.strip():
+                continue
+            normalized = taxonomy_normalizer.normalize_term(value)
+            competency_id = str(getattr(normalized, "canonical_id", "")).strip()
+            if not competency_id:
+                continue
+            default_weight = 0.65 if bool(getattr(normalized, "is_known", False)) else 0.4
+            resolved[competency_id] = max(resolved.get(competency_id, 0.0), default_weight)
+
+    return resolved
+
+
+def _resolve_candidate_competency_scores(*, candidate_profile: dict[str, Any], taxonomy_normalizer: Any) -> dict[str, float]:
+    raw_skills = candidate_profile.get("skills")
+    if not isinstance(raw_skills, dict):
+        return {}
+
+    resolved: dict[str, float] = {}
+    for raw_skill, raw_score in raw_skills.items():
+        if not isinstance(raw_score, (int, float)) or isinstance(raw_score, bool):
+            continue
+        skill_key = str(raw_skill).strip()
+        if not skill_key:
+            continue
+
+        competency_id: str
+        if skill_key.startswith("skill."):
+            competency_id = skill_key
+        else:
+            normalized = taxonomy_normalizer.normalize_term(skill_key.replace("_", " "))
+            competency_id = str(getattr(normalized, "canonical_id", "")).strip()
+            if not competency_id:
+                continue
+
+        score = max(0.0, min(1.0, float(raw_score)))
+        resolved[competency_id] = max(resolved.get(competency_id, 0.0), score)
+
+    return resolved
 
 
 def _build_evidence_spans(

@@ -287,6 +287,43 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertEqual(job_spec_payload["role_title"], "AI Automation Lead")
         self.assertIn("Build automation workflows", job_spec_payload["responsibilities"])
 
+    def test_competency_fit_combines_job_and_candidate_signals(self) -> None:
+        _, job_spec_id = self._create_job_spec()
+        _, candidate_id = self._create_candidate_profile()
+
+        status, _, body = _request(
+            self.app,
+            method="POST",
+            path="/v1/competency-fits",
+            body={
+                "job_spec_id": job_spec_id,
+                "candidate_id": candidate_id,
+            },
+        )
+
+        self.assertEqual(status, 200, body)
+        self.assertIsNone(body["error"])
+
+        data = body["data"]
+        self.assertEqual(data["job_spec_id"], job_spec_id)
+        self.assertEqual(data["candidate_id"], candidate_id)
+        self.assertIsInstance(data.get("overall_fit_score"), (int, float))
+        self.assertGreaterEqual(float(data["overall_fit_score"]), 0.0)
+        self.assertIsInstance(data.get("coverage_ratio"), (int, float))
+
+        competencies = data.get("competencies")
+        self.assertIsInstance(competencies, list)
+        self.assertGreaterEqual(len(competencies), 1)
+        by_id = {entry["competency"]: entry for entry in competencies if isinstance(entry, dict)}
+        self.assertIn("skill.python", by_id)
+        self.assertIn("skill.sql", by_id)
+        self.assertGreater(float(by_id["skill.python"]["candidate_score"]), 0.0)
+        self.assertGreater(float(by_id["skill.sql"]["candidate_score"]), 0.0)
+
+        top_gaps = data.get("top_gaps")
+        self.assertIsInstance(top_gaps, list)
+        self.assertLessEqual(len(top_gaps), 5)
+
     def test_patch_job_spec_review_success_persists_audit_row(self) -> None:
         _, job_spec_id = self._create_job_spec()
 
