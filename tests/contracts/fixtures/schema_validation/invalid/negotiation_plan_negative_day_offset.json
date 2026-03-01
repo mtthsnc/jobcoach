@@ -62,6 +62,35 @@
       "fallback_trade": "If base is fixed, request sign-on and documented review timeline."
     }
   ],
+  "follow_up_plan": {
+    "thank_you_note": {
+      "send_by_day_offset": 0,
+      "subject": "Thank you - Senior Backend Engineer discussion follow-up",
+      "body": "Thank you for the discussion and clarity on role scope.",
+      "key_points": [
+        "Reinforce trajectory readiness outcomes tied to role scope."
+      ]
+    },
+    "recruiter_cadence": [
+      {
+        "day_offset": 0,
+        "channel": "email",
+        "objective": "Reinforce value and alignment",
+        "message": "Thank recruiter and recap role-aligned outcomes tied to compensation rationale."
+      }
+    ],
+    "outcome_branches": [
+      {
+        "outcome": "positive_signal",
+        "actions": [
+          {
+            "day_offset": 0,
+            "action": "Confirm verbal alignment and request written offer details."
+          }
+        ]
+      }
+    ]
+  },
   "talking_points": [
     "Highlight measurable impact from last two roles."
   ],

@@ -89,6 +89,79 @@
       "fallback_trade": "Accept floor only with written growth criteria and near-term review."
     }
   ],
+  "follow_up_plan": {
+    "thank_you_note": {
+      "send_by_day_offset": 0,
+      "subject": "Thank you - Senior Backend Engineer discussion follow-up",
+      "body": "Thank you for the discussion and clarity on role scope. I remain excited about the opportunity and aligned on next steps.",
+      "key_points": [
+        "Reinforce trajectory readiness outcomes tied to role scope.",
+        "Reference compensation rationale around 185000.",
+        "Address deadline pressure concerns with explicit timeline checkpoints."
+      ]
+    },
+    "recruiter_cadence": [
+      {
+        "day_offset": 0,
+        "channel": "email",
+        "objective": "Reinforce value and alignment",
+        "message": "Thank recruiter and recap role-aligned outcomes tied to compensation rationale."
+      },
+      {
+        "day_offset": 2,
+        "channel": "email",
+        "objective": "Share concise supporting evidence",
+        "message": "Send compact proof points linked to readiness and delivery outcomes."
+      },
+      {
+        "day_offset": 5,
+        "channel": "phone",
+        "objective": "Confirm decision timeline",
+        "message": "Ask for next checkpoint and confirm resolution path for remaining concerns."
+      }
+    ],
+    "outcome_branches": [
+      {
+        "outcome": "positive_signal",
+        "actions": [
+          {
+            "day_offset": 0,
+            "action": "Confirm verbal alignment and request written offer details."
+          },
+          {
+            "day_offset": 1,
+            "action": "Validate compensation components and acceptance timeline."
+          }
+        ]
+      },
+      {
+        "outcome": "needs_approval",
+        "actions": [
+          {
+            "day_offset": 1,
+            "action": "Provide approver-focused evidence summary."
+          },
+          {
+            "day_offset": 3,
+            "action": "Schedule an approval checkpoint with recruiter."
+          }
+        ]
+      },
+      {
+        "outcome": "stalled_or_pushback",
+        "actions": [
+          {
+            "day_offset": 2,
+            "action": "Respond with bounded concession options and exchange terms."
+          },
+          {
+            "day_offset": 5,
+            "action": "Escalate fallback trade package (scope/review/non-base upside)."
+          }
+        ]
+      }
+    ]
+  },
   "talking_points": [
     "Highlight measurable impact from last two roles.",
     "Position compensation ask around expanded scope and delivery outcomes."
