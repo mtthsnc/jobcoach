@@ -6,26 +6,26 @@
 
 ## Active Task
 
-- Task ID: `M6-004`
-- Task: Implement post-interview follow-up planner (thank-you draft, recruiter cadence, outcome branches).
-- Why now: `M6-003` introduced deterministic negotiation strategy structures; follow-up planning now needs the same deterministic, schema-backed planning layer.
+- Task ID: `M6-005`
+- Task: Persist/retrieve negotiation plans with idempotent regeneration + optimistic version checks.
+- Why now: `M6-004` completed deterministic strategy and follow-up generation blocks; persistence semantics now need version progression and conflict-safe regeneration.
 
 ## Exact Next Steps
 
-1. Add deterministic follow-up planner module that emits thank-you draft guidance, recruiter touchpoint cadence, and branch actions from negotiation context + strategy signals.
-2. Integrate follow-up planner output into `NegotiationPlan` payload with explicit schema fields and deterministic ordering of actions.
-3. Add fixture-driven unit tests to lock branch selection, day-offset bounds, and deterministic follow-up content for fixed contexts.
-4. Extend API/unit/contract tests to assert follow-up plan fields are stable across regeneration/idempotent create flows and remain schema-valid.
+1. Extend negotiation plan create semantics with `expected_version` and `regenerate` request controls for optimistic conflict detection and explicit regeneration.
+2. Add repository versioning workflow for `NegotiationPlan` by `(candidate_id, target_role)` with idempotent replay/conflict behavior and supersede linkage.
+3. Update negotiation contracts/schemas to include version metadata and supersession fields required for retrieval and replay stability.
+4. Add unit/contract coverage for first-create, replay, regenerate progression, and stale expected-version conflicts while preserving schema validity.
 5. Run `make validate-openapi`, `make migrate-up`, `make migrate-down`, `make test`, and `make contract-test`.
 
 ## Validation Required
 
 - Confirm planning artifacts are coherent and actionable:
-  - Follow-up planning output is deterministic for fixed context fixtures.
-  - Negotiation plan payload remains schema-valid after follow-up plan integration.
-  - Unit/contract suites assert stable branch selection, day offsets, and action ordering.
-  - `docs/work-log.md` records M6-004 execution evidence.
+  - Versioned negotiation plans persist/retrieve correctly with deterministic payload blocks unchanged on replay.
+  - Regeneration increments version and sets supersedes linkage while preserving schema validity.
+  - Unit/contract suites assert idempotent replay, expected-version conflicts, and retrieval semantics.
+  - `docs/work-log.md` records M6-005 execution evidence.
 
 ## Return Pointer
 
-After `M6-004` is complete, advance pointer to `M6-005`.
+After `M6-005` is complete, advance pointer to `M6-006`.

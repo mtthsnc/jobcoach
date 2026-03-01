@@ -1731,3 +1731,59 @@ Use UTC timestamps. Append entries only.
   - Full `make contract-test` remains unstable with two non-M6 failures; M6-003-specific negotiation strategy contract and schema checks pass.
 - Next pointer:
   - Execute `M6-004` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T13:50:12Z
+- Execute `M6-004` deterministic post-interview follow-up planner.
+- Task IDs: M6-004
+- Changes made:
+  - Started implementation of deterministic follow-up planning (thank-you draft, recruiter cadence, and outcome branches) driven by negotiation strategy/context signals.
+- Validation evidence:
+  - Planned: unit/schema/contract coverage and full make validation gates.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete `M6-004` and advance pointer to `M6-005`.
+
+- END
+- 2026-03-01T13:57:40Z
+- Execute `M6-004` deterministic post-interview follow-up planner.
+- Task IDs: M6-004
+- Changes made:
+  - Added deterministic follow-up planner module `services/negotiation-planning/followup.py` to generate:
+    - structured `thank_you_note` guidance,
+    - recruiter cadence touchpoints,
+    - deterministic outcome branches and bounded follow-up actions.
+  - Integrated follow-up planner into negotiation payload construction in `apps/api-gateway/api_gateway/app.py`:
+    - wired module loading/dependency injection in `create_app`,
+    - generated and normalized `follow_up_plan` + bounded/sorted `follow_up_actions`,
+    - preserved deterministic fallback behavior for malformed planner outputs.
+  - Extended contracts:
+    - `schemas/openapi/openapi-m0-m2.yaml`: expanded `NegotiationPlan` with required `follow_up_plan` structure and bounded day offsets.
+    - `schemas/jsonschema/core-schemas.json`: mirrored follow-up plan schema additions and day-offset bounds.
+  - Added deterministic fixture coverage:
+    - `tests/unit/fixtures/negotiation_followup/benchmark_*.json`
+    - `tests/unit/test_negotiation_followup_planner.py`
+  - Extended unit/contract/schema tests:
+    - `tests/unit/test_job_spec_persistence.py`: follow-up plan presence, bounded day offsets, deterministic stability assertions.
+    - `tests/contracts/test_job_ingestions_api_contract.py`: contract and persistence assertions for structured follow-up plan fields.
+    - Updated negotiation schema fixtures under `tests/contracts/fixtures/schema_validation`.
+  - Updated planning artifacts:
+    - Marked `M6-004` as `DONE` in `docs/tasklist.md`.
+    - Advanced `docs/NEXT_ACTION.md` pointer to `M6-005`.
+    - Added decision `DEC-014` in `docs/decision-log.md`.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_negotiation_followup_planner.py`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/contracts/test_schema_validation.py`
+  - `make validate-openapi`
+  - `MIGRATE_DB_PATH=.tmp/m6-004-make-up.sqlite3 make migrate-up`
+  - `MIGRATE_DB_PATH=.tmp/m6-004-make-down.sqlite3 make migrate-down`
+  - `MIGRATE_DB_PATH=.tmp/m6-004-smoke-seq.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh up`
+  - `MIGRATE_DB_PATH=.tmp/m6-004-smoke-seq.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh down`
+  - `PYTHONDONTWRITEBYTECODE=1 make test`
+  - `make contract-test` (fails with pre-existing non-M6 contract failures: `test_append_interview_response_contract_with_idempotency`, `test_create_and_get_feedback_report_contract`)
+- Blockers / risks:
+  - Full `make contract-test` remains blocked by two non-M6 contract failures in this environment; M6-004 follow-up planner contract/schema checks pass.
+- Next pointer:
+  - Execute `M6-005` from `docs/NEXT_ACTION.md`.

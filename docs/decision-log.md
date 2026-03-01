@@ -168,3 +168,15 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Keep strategy derivation inline in API handlers without a dedicated module.
   - Keep only free-form `strategy_summary` and talking points without structured ladder/playbook contracts.
+
+- Decision ID: `DEC-014`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: M6-004 needed deterministic post-interview follow-up content (thank-you guidance, recruiter cadence, and outcome branches) without introducing non-repeatable drafting variance.
+- Decision: Add a dedicated deterministic negotiation follow-up planner and persist structured `NegotiationPlan.follow_up_plan` blocks (`thank_you_note`, `recruiter_cadence`, `outcome_branches`) alongside bounded, deterministic `follow_up_actions`.
+- Consequences:
+  - Follow-up outputs are now schema-validated, branch-ordered, day-bounded, and reproducible for fixed strategy/context inputs.
+  - Negotiation contract surface area increased, and downstream M6-005 versioning must preserve the expanded follow-up structure across replay/regeneration flows.
+- Alternatives considered:
+  - Keep only free-form `follow_up_actions` templates without structured follow-up planning blocks.
+  - Generate follow-up copy inline in API handlers instead of a dedicated deterministic planner module.
