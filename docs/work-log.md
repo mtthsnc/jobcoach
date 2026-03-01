@@ -2421,3 +2421,50 @@ Use UTC timestamps. Append entries only.
   - In this sandbox, contract tests require elevated execution due local API socket bind restrictions.
 - Next pointer:
   - Execute `M8-003` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T21:39:13Z
+- Execute `M8-003` outbox relay worker with bounded retry/backoff, publish-attempt tracking, and dead-letter semantics.
+- Task IDs: M8-003
+- Changes made:
+  - Started implementation of relay execution semantics over `outbox_events` with deterministic retry/backoff transitions and terminal dead-letter handling metadata.
+- Validation evidence:
+  - Planned: targeted outbox relay/store unit tests, then full `make test`, `make validate-openapi`, migrate up/down checks, and `make contract-test`.
+- Blockers / risks:
+  - Contract tests expected to require elevated execution in this sandbox due local API bind restrictions.
+- Next pointer:
+  - Complete `M8-003` implementation/tests and advance pointer to `M8-004`.
+
+- END
+- 2026-03-01T21:40:28Z
+- Execute `M8-003` outbox relay worker with bounded retry/backoff, publish-attempt tracking, and dead-letter semantics.
+- Task IDs: M8-003
+- Changes made:
+  - Implemented relay/runtime primitives in `packages/eventing/outbox.py`:
+    - added `OutboxRelayWorker` with deterministic `run_once` execution over ready events and bounded retry policy integration,
+    - added relay policy/result abstractions (`OutboxRelayPolicy`, `OutboxRelayRunResult`) and publisher protocol,
+    - added failure transition support (`record_publish_failure`) that increments `publish_attempts`, updates `last_error`, schedules deterministic retry backoff, and marks retry-exhausted events dead-letter terminal (`status='failed'`, `dead_lettered_at`).
+  - Added migration `infra/migrations/013_m8_outbox_relay_reliability.sql`:
+    - added `publish_attempts` and `dead_lettered_at` columns,
+    - backfilled `publish_attempts` from legacy `failure_count`,
+    - added reversible down-path table rebuild semantics.
+  - Extended eventing package exports in `packages/eventing/__init__.py`.
+  - Added reliability unit coverage:
+    - `tests/unit/test_outbox_relay_worker.py` for happy-path publish, transient retry recovery, and retry-exhausted dead-letter outcomes,
+    - `tests/unit/test_sqlite_outbox.py` coverage for deterministic failure transition scheduling and terminal dead-letter metadata.
+  - Updated continuity/docs:
+    - `docs/tasklist.md`: marked `M8-003` as `DONE`; advanced NEXT queue to `M8-004` then `M8-005`.
+    - `docs/NEXT_ACTION.md`: advanced active pointer to `M8-004`.
+    - `docs/decision-log.md`: added `DEC-027` for outbox relay retry/dead-letter policy.
+    - `docs/api-surface.md`: documented relay ordering, retry metadata, and dead-letter semantics.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.unit.test_sqlite_outbox tests.unit.test_outbox_relay_worker`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 make test` (pass)
+  - `make validate-openapi` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m8-003-migrate-up.sqlite3 make migrate-up` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m8-003-migrate-down.sqlite3 make migrate-down` (pass)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test` (initial sandbox bind failure; pass on elevated rerun)
+- Blockers / risks:
+  - In this sandbox, contract tests require elevated execution due local API socket bind restrictions.
+- Next pointer:
+  - Execute `M8-004` from `docs/NEXT_ACTION.md`.

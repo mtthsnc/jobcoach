@@ -1,3 +1,21 @@
-from .outbox import OutboxEvent, OutboxStore, SQLiteOutboxStore
+from .outbox import (
+    OutboxEvent,
+    OutboxEventPublisher,
+    OutboxFailureTransition,
+    OutboxRelayPolicy,
+    OutboxRelayRunResult,
+    OutboxRelayWorker,
+    OutboxStore,
+    SQLiteOutboxStore,
+)
 
-__all__ = ["OutboxEvent", "OutboxStore", "SQLiteOutboxStore"]
+__all__ = [
+    "OutboxEvent",
+    "OutboxEventPublisher",
+    "OutboxFailureTransition",
+    "OutboxRelayPolicy",
+    "OutboxRelayRunResult",
+    "OutboxRelayWorker",
+    "OutboxStore",
+    "SQLiteOutboxStore",
+]

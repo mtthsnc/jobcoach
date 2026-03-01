@@ -12,6 +12,11 @@ Request observability guardrails:
 - `request_id` propagates from inbound `x-request-id` when supplied and is linked to response envelope `meta.request_id`.
 - High-risk free-text fields are redacted in log metadata (`cv_text`, `story_notes`, and free-text `source_value` payloads).
 
+Outbox relay guardrails:
+- Relay worker publishes pending outbox rows deterministically (`available_at` then `created_at` order).
+- Publish failures increment `publish_attempts`, persist bounded `last_error`, and schedule deterministic retry backoff.
+- Retry-exhausted events transition to terminal dead-letter state (`status=failed`) with `dead_lettered_at` metadata.
+
 ## Implemented Endpoints (API Gateway)
 
 - `POST /job-ingestions`

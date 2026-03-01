@@ -332,3 +332,20 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Emit ad hoc plaintext logs per route/handler without a shared structure.
   - Skip request payload metadata entirely, reducing leakage risk but removing redaction-policy observability coverage.
+
+- Decision ID: `DEC-027`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: `M8-003` required a deterministic outbox relay execution path with bounded retries/backoff and dead-letter handling for repeatedly failing publish attempts.
+- Decision: Add an outbox relay worker abstraction in `packages/eventing` that:
+  - dequeues ready pending events deterministically (`available_at`, then `created_at`),
+  - publishes through a relay publisher protocol,
+  - marks success as `published` with deterministic `published_at`,
+  - records failure transitions with `publish_attempts`/`last_error`, fixed retry schedule, and terminal dead-letter semantics using `status='failed'` plus `dead_lettered_at`.
+- Consequences:
+  - Relay execution is replay-safe under repeated worker runs and preserves deterministic state transitions for success, retry, and exhausted-failure paths.
+  - Outbox rows now expose explicit publish-attempt/dead-letter metadata needed for operational triage and async-orchestration dependencies in `M8-004`.
+  - Migration `013` extends outbox schema without changing external API contracts.
+- Alternatives considered:
+  - Keep failure tracking only in `failure_count` without explicit publish-attempt/dead-letter metadata fields.
+  - Use unbounded retries and rely on operator intervention instead of deterministic retry exhaustion handling.
