@@ -1228,6 +1228,8 @@ class JobSpecPersistenceTest(unittest.TestCase):
         assert isinstance(negotiation_plan_id, str)
         self.assertEqual(plan.get("candidate_id"), candidate_id)
         self.assertEqual(plan.get("target_role"), target_role)
+        self.assertEqual(plan.get("version"), 1)
+        self.assertIsNone(plan.get("supersedes_negotiation_plan_id"))
         self.assertEqual(plan.get("offer_deadline_date"), "2026-03-15")
         compensation_targets = plan.get("compensation_targets")
         self.assertIsInstance(compensation_targets, dict)
@@ -1291,7 +1293,9 @@ class JobSpecPersistenceTest(unittest.TestCase):
                     candidate_id,
                     target_role,
                     idempotency_key,
-                    payload_json
+                    payload_json,
+                    version,
+                    supersedes_negotiation_plan_id
                 FROM negotiation_plans
                 WHERE negotiation_plan_id = ?
                 """,
@@ -1303,10 +1307,14 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertEqual(row[1], candidate_id)
         self.assertEqual(row[2], target_role)
         self.assertEqual(row[3], "negotiation-unit-create-001")
+        self.assertEqual(row[5], 1)
+        self.assertIsNone(row[6])
         payload = json.loads(str(row[4]))
         self.assertEqual(payload.get("negotiation_plan_id"), negotiation_plan_id)
         self.assertEqual(payload.get("candidate_id"), candidate_id)
         self.assertEqual(payload.get("target_role"), target_role)
+        self.assertEqual(payload.get("version"), 1)
+        self.assertIsNone(payload.get("supersedes_negotiation_plan_id"))
 
         get_status, _, get_body = _request(
             self.app,
@@ -1323,6 +1331,8 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertEqual(get_body["data"].get("concession_ladder"), plan.get("concession_ladder"))
         self.assertEqual(get_body["data"].get("objection_playbook"), plan.get("objection_playbook"))
         self.assertEqual(get_body["data"].get("follow_up_plan"), plan.get("follow_up_plan"))
+        self.assertEqual(get_body["data"].get("version"), 1)
+        self.assertIsNone(get_body["data"].get("supersedes_negotiation_plan_id"))
 
     def test_negotiation_plan_context_is_deterministic_for_fixed_history(self) -> None:
         _, job_spec_id = self._create_job_spec()
@@ -1402,6 +1412,10 @@ class JobSpecPersistenceTest(unittest.TestCase):
         second_plan = second_body["data"]
 
         self.assertNotEqual(second_plan.get("negotiation_plan_id"), first_plan.get("negotiation_plan_id"))
+        self.assertEqual(first_plan.get("version"), 1)
+        self.assertIsNone(first_plan.get("supersedes_negotiation_plan_id"))
+        self.assertEqual(second_plan.get("version"), 2)
+        self.assertEqual(second_plan.get("supersedes_negotiation_plan_id"), first_plan.get("negotiation_plan_id"))
         self.assertEqual(second_plan.get("compensation_targets"), first_plan.get("compensation_targets"))
         self.assertEqual(second_plan.get("leverage_signals"), first_plan.get("leverage_signals"))
         self.assertEqual(second_plan.get("risk_signals"), first_plan.get("risk_signals"))
@@ -1465,6 +1479,26 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertEqual(invalid_salary_status, 400, invalid_salary_body)
         self.assertEqual(invalid_salary_body["error"]["code"], "invalid_request")
 
+        invalid_expected_version_status, _, invalid_expected_version_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={"candidate_id": candidate_id, "target_role": "Backend Engineer", "expected_version": -1},
+            headers={"Idempotency-Key": "negotiation-unit-invalid-expected-version-001"},
+        )
+        self.assertEqual(invalid_expected_version_status, 400, invalid_expected_version_body)
+        self.assertEqual(invalid_expected_version_body["error"]["code"], "invalid_request")
+
+        invalid_regenerate_status, _, invalid_regenerate_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={"candidate_id": candidate_id, "target_role": "Backend Engineer", "regenerate": "yes"},
+            headers={"Idempotency-Key": "negotiation-unit-invalid-regenerate-001"},
+        )
+        self.assertEqual(invalid_regenerate_status, 400, invalid_regenerate_body)
+        self.assertEqual(invalid_regenerate_body["error"]["code"], "invalid_request")
+
         first_status, _, first_body = _request(
             self.app,
             method="POST",
@@ -1527,6 +1561,102 @@ class JobSpecPersistenceTest(unittest.TestCase):
         )
         self.assertEqual(get_missing_status, 404, get_missing_body)
         self.assertEqual(get_missing_body["error"]["code"], "not_found")
+
+    def test_negotiation_plan_regeneration_progression_and_expected_version_conflict(self) -> None:
+        _, candidate_id = self._create_candidate_profile()
+        target_role = "Staff Backend Engineer"
+
+        first_status, _, first_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={"candidate_id": candidate_id, "target_role": target_role},
+            headers={"Idempotency-Key": "negotiation-version-unit-initial"},
+        )
+        self.assertEqual(first_status, 201, first_body)
+        first_plan = first_body["data"]
+        first_plan_id = first_plan.get("negotiation_plan_id")
+        self.assertEqual(first_plan.get("version"), 1)
+        self.assertIsNone(first_plan.get("supersedes_negotiation_plan_id"))
+
+        conflict_status, _, conflict_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+                "regenerate": True,
+                "expected_version": 0,
+            },
+            headers={"Idempotency-Key": "negotiation-version-unit-conflict-001"},
+        )
+        self.assertEqual(conflict_status, 409, conflict_body)
+        self.assertEqual(conflict_body["error"]["code"], "version_conflict")
+        reasons = [item.get("reason", "") for item in conflict_body["error"].get("details", [])]
+        self.assertTrue(any("current version is 1" in reason for reason in reasons))
+
+        second_status, _, second_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+                "regenerate": True,
+                "expected_version": 1,
+            },
+            headers={"Idempotency-Key": "negotiation-version-unit-next"},
+        )
+        self.assertEqual(second_status, 201, second_body)
+        second_plan = second_body["data"]
+        second_plan_id = second_plan.get("negotiation_plan_id")
+        self.assertNotEqual(second_plan_id, first_plan_id)
+        self.assertEqual(second_plan.get("version"), 2)
+        self.assertEqual(second_plan.get("supersedes_negotiation_plan_id"), first_plan_id)
+
+        second_replay_status, _, second_replay_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+                "regenerate": True,
+                "expected_version": 1,
+            },
+            headers={"Idempotency-Key": "negotiation-version-unit-next"},
+        )
+        self.assertEqual(second_replay_status, 201, second_replay_body)
+        self.assertEqual(second_replay_body["data"].get("negotiation_plan_id"), second_plan_id)
+        self.assertEqual(second_replay_body["data"].get("version"), 2)
+        self.assertEqual(second_replay_body["data"].get("supersedes_negotiation_plan_id"), first_plan_id)
+
+        stale_status, _, stale_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+                "regenerate": True,
+                "expected_version": 1,
+            },
+            headers={"Idempotency-Key": "negotiation-version-unit-stale"},
+        )
+        self.assertEqual(stale_status, 409, stale_body)
+        self.assertEqual(stale_body["error"]["code"], "version_conflict")
+        stale_reasons = [item.get("reason", "") for item in stale_body["error"].get("details", [])]
+        self.assertTrue(any("current version is 2" in reason for reason in stale_reasons))
+
+        get_status, _, get_body = _request(
+            self.app,
+            method="GET",
+            path=f"/v1/negotiation-plans/{second_plan_id}",
+        )
+        self.assertEqual(get_status, 200, get_body)
+        self.assertEqual(get_body["data"].get("version"), 2)
+        self.assertEqual(get_body["data"].get("supersedes_negotiation_plan_id"), first_plan_id)
 
     def test_create_and_get_trajectory_plan_persists_schema_valid_row(self) -> None:
         _, candidate_id = self._create_candidate_profile()
