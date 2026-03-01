@@ -290,3 +290,15 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Rely only on repository/API unit+contract tests without a dedicated orchestration reliability benchmark gate.
   - Add a non-threshold smoke check that emits reports but does not gate `make test`/CI pass-fail outcomes.
+
+- Decision ID: `DEC-024`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: After M7 closeout, core product-surface contracts are implemented, but key non-functional requirements remain under-hardened (bearer-auth enforcement, sensitive-data-safe observability, outbox relay execution, and worker-driven async eval orchestration).
+- Decision: Define M8 as an operational hardening milestone and decompose it into `M8-001`..`M8-006` in dependency order: auth guardrails first, then structured/redacted observability, then outbox relay reliability, then async eval orchestration, then readiness/SLO gating, and finally retention/redaction operations runbook hardening before milestone closeout.
+- Consequences:
+  - The roadmap advances from feature-surface delivery into production-readiness reliability and security controls while preserving deterministic behavior requirements.
+  - M8 introduces deeper cross-cutting changes (gateway, orchestrator, eventing, benchmarks, and operations docs), increasing integration-test scope but reducing operational risk exposure.
+- Alternatives considered:
+  - Start a new end-user feature milestone and defer operational hardening tasks.
+  - Implement auth/logging/async orchestration as ad hoc patches without a dedicated milestone sequence and acceptance gates.

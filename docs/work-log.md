@@ -2292,3 +2292,38 @@ Use UTC timestamps. Append entries only.
   - In this sandbox, contract tests require elevated execution due local API socket bind restrictions.
 - Next pointer:
   - Execute `M8-PLAN-001` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T20:51:26Z
+- Execute `M8-PLAN-001` and define executable M8 task graph.
+- Task IDs: M8-PLAN-001
+- Changes made:
+  - Started M8 planning pass focused on production-readiness gaps across auth guardrails, observability/redaction, async orchestration, and runtime reliability gates.
+- Validation evidence:
+  - Planned: planning-doc consistency checks across `docs/tasklist.md`, `docs/NEXT_ACTION.md`, `docs/decision-log.md`, `docs/masterplan.md`, and `docs/implementation-plan.md`.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Commit M8 task graph and move active pointer to `M8-001`.
+
+- END
+- 2026-03-01T20:53:08Z
+- Execute `M8-PLAN-001` and define executable M8 task graph.
+- Task IDs: M8-PLAN-001
+- Changes made:
+  - Marked `M8-PLAN-001` as `DONE` and added executable M8 task graph (`M8-001`..`M8-006`) plus `M8-CLOSE-001`/`M9-PLAN-001` continuity tasks in `docs/tasklist.md`.
+  - Updated `docs/tasklist.md` NEXT queue to `M8-001` then `M8-002`.
+  - Updated `docs/NEXT_ACTION.md` active pointer to `M8-001` with concrete implementation and validation steps.
+  - Added decision `DEC-024` in `docs/decision-log.md` documenting M8 decomposition rationale and dependency ordering.
+  - Updated milestone-planning references in `docs/masterplan.md` and `docs/implementation-plan.md` to include M8 operational hardening scope and exit gates.
+- Validation evidence:
+  - Planning artifacts are pointer-consistent and acceptance-aligned across:
+    - `docs/tasklist.md`
+    - `docs/NEXT_ACTION.md`
+    - `docs/decision-log.md`
+    - `docs/masterplan.md`
+    - `docs/implementation-plan.md`
+- Blockers / risks:
+  - No blockers encountered.
+- Next pointer:
+  - Execute `M8-001` from `docs/NEXT_ACTION.md`.

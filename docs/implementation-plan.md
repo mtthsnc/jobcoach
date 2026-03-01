@@ -16,6 +16,8 @@
 5. Feedback and root-cause analytics (`M4`).
 6. Progress and trajectory intelligence (`M5`).
 7. Negotiation and follow-up support (`M6`).
+8. Taxonomy normalization and evaluation-ops orchestration (`M7`).
+9. Operational hardening, security guardrails, and async orchestration reliability (`M8`).
 
 ## 3. Milestone Plan
 
@@ -82,6 +84,41 @@
 - >= 95% generated session snapshots validate as `InterviewSession`.
 - Benchmark relevance score meets or exceeds M3 gate threshold (>= 0.80).
 - Low-confidence adaptive outputs are explicitly flagged for reviewer override.
+
+## M7: Taxonomy + Evaluation Operations
+
+### Deliverables
+
+- `POST /taxonomy/normalize` gateway wiring with deterministic normalization outputs.
+- `POST /evals/run` orchestration flow with persisted run-state transitions.
+- `GET /evals/{eval_run_id}` retrieval endpoint for queued/running/terminal eval states.
+- Eval lifecycle outbox events for queued/succeeded/failed transitions.
+- Eval-orchestration benchmark and threshold gate integrated into local/CI validation.
+
+### Acceptance criteria
+
+- Taxonomy normalize endpoint passes schema/contract tests and deterministic fixture checks.
+- Eval run create/get flows pass contract tests for queued/running/succeeded/failed/not-found semantics.
+- Eval lifecycle event payloads persist and pass retry/publish behavior tests.
+- Eval-orchestration benchmark passes configured threshold gates in `make test` and CI.
+
+## M8: Operational Hardening + Reliability
+
+### Deliverables
+
+- Bearer-auth enforcement for `/v1` endpoints with deterministic unauthorized error semantics and explicit local-dev bypass controls.
+- Structured request logs with request/correlation IDs, route/status/latency fields, and sensitive-field redaction for candidate/job free-text payloads.
+- Worker-driven outbox relay with bounded retry/backoff and dead-letter behavior for repeatedly failing publishes.
+- Async eval orchestration path where `POST /evals/run` enqueues work and worker execution drives `queued -> running -> terminal` state transitions.
+- Runtime health/readiness probes and latency benchmark gate for read endpoints.
+
+### Acceptance criteria
+
+- Unauthorized or malformed auth requests return contract-valid `401` envelopes and authorized flows retain existing contract behavior.
+- Structured logs include deterministic request metadata and exclude raw sensitive payload text according to redaction policy tests.
+- Outbox relay publishes ready events with retry-safe dedup semantics, bounded retries, and deterministic dead-letter transitions under failure.
+- Eval runs transition through persisted async lifecycle states via worker execution, with create/get contract and orchestration benchmarks passing.
+- Runtime readiness checks and read-path latency benchmark (`p95 <= 400ms`) are enforced by local/CI validation commands.
 
 ## 4. Suggested Sprint Breakdown
 

@@ -2,35 +2,36 @@
 
 ## Active Milestone
 
-`M8` (Planning)
+`M8` (Operational Hardening)
 
 ## Active Task
 
-- Task ID: `M8-PLAN-001`
-- Task: Define executable M8 backlog with dependencies and acceptance criteria.
-- Why now: `M7-CLOSE-001` is complete with final validation evidence and release notes recorded, so the next critical path is planning M8 into concrete executable tasks.
+- Task ID: `M8-001`
+- Task: Enforce bearer-auth guardrails on `/v1` endpoints with deterministic unauthorized responses and local-dev bypass control.
+- Why now: `M8-PLAN-001` is complete, and auth enforcement is the first dependency for downstream M8 observability and async orchestration hardening tasks.
 
 ## Exact Next Steps
 
-1. Define M8 implementation scope and sequence:
-   - identify M8 objective and contract/runtime surfaces from current roadmap,
-   - break scope into executable tasks (`M8-001`..`M8-00N`) with dependency ordering.
-2. Update planning artifacts:
-   - add M8 tasks to `docs/tasklist.md` with priority, dependencies, and explicit acceptance criteria,
-   - ensure only `M8-PLAN-001` is closed when the task graph is complete.
-3. Record planning decisions + handoff:
-   - document planning rationale in `docs/decision-log.md` if task boundaries or ordering introduce new architectural/operational decisions,
-   - append START/END evidence in `docs/work-log.md`,
-   - move pointer to the first executable M8 task after plan completion.
+1. Implement auth guardrails in the gateway:
+   - require bearer token validation for `/v1` endpoints,
+   - preserve `/health` unauthenticated behavior,
+   - add explicit local-dev bypass env control for deterministic local test execution.
+2. Align contracts/tests with auth semantics:
+   - update OpenAPI/error schema usage if needed for unauthorized responses,
+   - add/extend unit + contract tests for missing, malformed, and valid bearer token flows.
+3. Run validation and record handoff:
+   - execute targeted tests plus full gates (`make test`, `make validate-openapi`, migrate up/down, `make contract-test`),
+   - append START/END execution evidence in `docs/work-log.md`,
+   - move pointer to `M8-002` after acceptance criteria pass.
 
 ## Validation Required
 
-- Confirm M8 planning artifacts are complete and actionable:
-  - `docs/tasklist.md` contains a complete M8 task graph with dependencies and acceptance criteria.
-  - The first executable M8 task is clearly identified and set as next pointer.
-  - `docs/work-log.md` captures planning execution evidence.
-  - Any significant planning/architecture rationale is logged in `docs/decision-log.md`.
+- Confirm `M8-001` acceptance criteria:
+  - Missing/malformed bearer tokens return deterministic contract-valid `401` envelopes.
+  - Authorized requests preserve existing endpoint behavior.
+  - Local-dev bypass control is explicit, deterministic, and covered by tests.
+  - Validation evidence is captured in `docs/work-log.md`.
 
 ## Return Pointer
 
-After `M8-PLAN-001` is complete, execute the first executable M8 implementation task.
+After `M8-001` is complete, execute `M8-002`.

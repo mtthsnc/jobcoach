@@ -82,6 +82,8 @@ Contract artifacts live in `schemas/openapi/` and `schemas/jsonschema/`.
 - Phase M4: scoring, feedback, and gap analytics.
 - Phase M5: progress tracking and trajectory planning.
 - Phase M6: negotiation and post-interview modules.
+- Phase M7: taxonomy normalization and evaluation-ops orchestration.
+- Phase M8: operational hardening, security guardrails, and asynchronous orchestration reliability.
 
 ## 10. Milestone Exit Gates
 
@@ -91,6 +93,9 @@ Contract artifacts live in `schemas/openapi/` and `schemas/jsonschema/`.
 - M3: Interview relevance score >= 0.80 and session-schema validity >= 95%.
 - M4: Every gap feedback item includes evidence and action.
 - M5: Trend dashboard correctly computes improvement metrics.
+- M6: Negotiation/follow-up quality benchmark passes threshold gates in CI/local.
+- M7: Taxonomy normalize + eval-run endpoints are contract-tested and eval orchestration reliability gate passes.
+- M8: Auth/observability guardrails are enforced, async eval orchestration is worker-driven, and runtime reliability/SLO gates pass in CI/local.
 
 ## 11. Program Governance
 
