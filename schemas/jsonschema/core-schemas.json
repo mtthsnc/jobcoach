@@ -268,6 +268,8 @@
         "negotiation_plan_id": { "type": "string" },
         "candidate_id": { "type": "string" },
         "target_role": { "type": "string" },
+        "version": { "type": "integer", "minimum": 1 },
+        "supersedes_negotiation_plan_id": { "type": "string" },
         "strategy_summary": { "type": "string" },
         "offer_deadline_date": { "type": "string", "format": "date" },
         "compensation_targets": {
