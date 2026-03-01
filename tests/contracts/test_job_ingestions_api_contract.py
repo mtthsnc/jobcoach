@@ -1121,6 +1121,8 @@ class JobIngestionApiContractTest(unittest.TestCase):
         assert isinstance(negotiation_plan_id, str)
         self.assertEqual(data.get("candidate_id"), candidate_id)
         self.assertEqual(data.get("target_role"), target_role)
+        self.assertEqual(data.get("version"), 1)
+        self.assertIsNone(data.get("supersedes_negotiation_plan_id"))
         self.assertEqual(data.get("offer_deadline_date"), "2026-03-10")
         compensation_targets = data.get("compensation_targets")
         self.assertIsInstance(compensation_targets, dict)
@@ -1191,6 +1193,8 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(get_body.get("data", {}).get("objection_playbook"), data.get("objection_playbook"))
         self.assertEqual(get_body.get("data", {}).get("follow_up_plan"), data.get("follow_up_plan"))
         self.assertEqual(get_body.get("data", {}).get("follow_up_actions"), data.get("follow_up_actions"))
+        self.assertEqual(get_body.get("data", {}).get("version"), 1)
+        self.assertIsNone(get_body.get("data", {}).get("supersedes_negotiation_plan_id"))
 
         self._assert_negotiation_plan_row_persisted(
             negotiation_plan_id=negotiation_plan_id,
@@ -1287,7 +1291,15 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(second_status, 201, second_body)
         second_plan = second_body.get("data", {})
 
+        first_version = first_plan.get("version")
+        second_version = second_plan.get("version")
+        self.assertIsInstance(first_version, int)
+        self.assertIsInstance(second_version, int)
+        assert isinstance(first_version, int)
+        assert isinstance(second_version, int)
         self.assertNotEqual(second_plan.get("negotiation_plan_id"), first_plan.get("negotiation_plan_id"))
+        self.assertEqual(second_version, first_version + 1)
+        self.assertEqual(second_plan.get("supersedes_negotiation_plan_id"), first_plan.get("negotiation_plan_id"))
         self.assertEqual(second_plan.get("compensation_targets"), first_plan.get("compensation_targets"))
         self.assertEqual(second_plan.get("leverage_signals"), first_plan.get("leverage_signals"))
         self.assertEqual(second_plan.get("risk_signals"), first_plan.get("risk_signals"))
@@ -1334,6 +1346,34 @@ class JobIngestionApiContractTest(unittest.TestCase):
         )
         self.assertEqual(invalid_salary_status, 400, invalid_salary_body)
         self.assertEqual(invalid_salary_body.get("error", {}).get("code"), "invalid_request")
+
+        invalid_expected_status, invalid_expected_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Backend Engineer",
+                "expected_version": -1,
+            },
+            headers={"Idempotency-Key": "negotiation-invalid-expected-version-001"},
+        )
+        self.assertEqual(invalid_expected_status, 400, invalid_expected_body)
+        self.assertEqual(invalid_expected_body.get("error", {}).get("code"), "invalid_request")
+
+        invalid_regenerate_status, invalid_regenerate_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Backend Engineer",
+                "regenerate": "yes",
+            },
+            headers={"Idempotency-Key": "negotiation-invalid-regenerate-001"},
+        )
+        self.assertEqual(invalid_regenerate_status, 400, invalid_regenerate_body)
+        self.assertEqual(invalid_regenerate_body.get("error", {}).get("code"), "invalid_request")
 
         first_status, first_body = _request_json(
             self.base_url,
@@ -1385,6 +1425,110 @@ class JobIngestionApiContractTest(unittest.TestCase):
         )
         self.assertEqual(get_missing_status, 404, get_missing_body)
         self.assertEqual(get_missing_body.get("error", {}).get("code"), "not_found")
+
+    def test_negotiation_plan_expected_version_conflict_and_regeneration_contract(self) -> None:
+        candidate_id = self._create_candidate_entity_for_interview()
+        target_role = "Staff Backend Engineer"
+
+        first_status, first_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={"candidate_id": candidate_id, "target_role": target_role},
+            headers={"Idempotency-Key": f"negotiation-version-initial-{uuid.uuid4()}"},
+        )
+        self.assertEqual(first_status, 201, first_body)
+        first_data = first_body.get("data", {})
+        first_plan_id = first_data.get("negotiation_plan_id")
+        self.assertIsInstance(first_plan_id, str)
+        self.assertTrue(first_plan_id)
+        assert isinstance(first_plan_id, str)
+        self.assertEqual(first_data.get("version"), 1)
+        self.assertIsNone(first_data.get("supersedes_negotiation_plan_id"))
+
+        conflict_status, conflict_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+                "regenerate": True,
+                "expected_version": 0,
+            },
+            headers={"Idempotency-Key": f"negotiation-version-conflict-{uuid.uuid4()}"},
+        )
+        self.assertEqual(conflict_status, 409, conflict_body)
+        self.assertEqual(conflict_body.get("error", {}).get("code"), "version_conflict")
+        conflict_details = conflict_body.get("error", {}).get("details", [])
+        self.assertTrue(any("current version is 1" in str(item.get("reason", "")) for item in conflict_details))
+
+        regenerate_key = f"negotiation-version-next-{uuid.uuid4()}"
+        second_status, second_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+                "regenerate": True,
+                "expected_version": 1,
+            },
+            headers={"Idempotency-Key": regenerate_key},
+        )
+        self.assertEqual(second_status, 201, second_body)
+        second_data = second_body.get("data", {})
+        second_plan_id = second_data.get("negotiation_plan_id")
+        self.assertIsInstance(second_plan_id, str)
+        self.assertTrue(second_plan_id)
+        assert isinstance(second_plan_id, str)
+        self.assertNotEqual(second_plan_id, first_plan_id)
+        self.assertEqual(second_data.get("version"), 2)
+        self.assertEqual(second_data.get("supersedes_negotiation_plan_id"), first_plan_id)
+
+        regenerate_replay_status, regenerate_replay_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+                "regenerate": True,
+                "expected_version": 1,
+            },
+            headers={"Idempotency-Key": regenerate_key},
+        )
+        self.assertEqual(regenerate_replay_status, 201, regenerate_replay_body)
+        replay_data = regenerate_replay_body.get("data", {})
+        self.assertEqual(replay_data.get("negotiation_plan_id"), second_plan_id)
+        self.assertEqual(replay_data.get("version"), 2)
+        self.assertEqual(replay_data.get("supersedes_negotiation_plan_id"), first_plan_id)
+
+        stale_status, stale_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": target_role,
+                "regenerate": True,
+                "expected_version": 1,
+            },
+            headers={"Idempotency-Key": f"negotiation-version-stale-{uuid.uuid4()}"},
+        )
+        self.assertEqual(stale_status, 409, stale_body)
+        self.assertEqual(stale_body.get("error", {}).get("code"), "version_conflict")
+        stale_details = stale_body.get("error", {}).get("details", [])
+        self.assertTrue(any("current version is 2" in str(item.get("reason", "")) for item in stale_details))
+
+        get_status, get_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/negotiation-plans/{second_plan_id}",
+        )
+        self.assertEqual(get_status, 200, get_body)
+        self.assertEqual(get_body.get("data", {}).get("version"), 2)
+        self.assertEqual(get_body.get("data", {}).get("supersedes_negotiation_plan_id"), first_plan_id)
 
     def test_create_and_get_trajectory_plan_contract(self) -> None:
         candidate_id = self._create_candidate_entity_for_interview()
@@ -2400,11 +2544,20 @@ class JobIngestionApiContractTest(unittest.TestCase):
         candidate_id: str,
         target_role: str,
         idempotency_key: str,
+        expected_version: int = 1,
+        expected_supersedes_negotiation_plan_id: str | None = None,
     ) -> None:
         with closing(sqlite3.connect(self.db_path)) as conn:
             row = conn.execute(
                 """
-                SELECT negotiation_plan_id, candidate_id, target_role, idempotency_key, payload_json
+                SELECT
+                    negotiation_plan_id,
+                    candidate_id,
+                    target_role,
+                    idempotency_key,
+                    payload_json,
+                    version,
+                    supersedes_negotiation_plan_id
                 FROM negotiation_plans
                 WHERE negotiation_plan_id = ?
                 """,
@@ -2417,10 +2570,14 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(row[1], candidate_id)
         self.assertEqual(row[2], target_role)
         self.assertEqual(row[3], idempotency_key)
+        self.assertEqual(int(row[5]), expected_version)
+        self.assertEqual(row[6], expected_supersedes_negotiation_plan_id)
         payload = json.loads(str(row[4]))
         self.assertEqual(payload.get("negotiation_plan_id"), negotiation_plan_id)
         self.assertEqual(payload.get("candidate_id"), candidate_id)
         self.assertEqual(payload.get("target_role"), target_role)
+        self.assertEqual(payload.get("version"), expected_version)
+        self.assertEqual(payload.get("supersedes_negotiation_plan_id"), expected_supersedes_negotiation_plan_id)
         self.assertIsInstance(payload.get("compensation_targets"), dict)
         compensation_targets = payload.get("compensation_targets", {})
         self.assertIn("recommended_counter_base_salary", compensation_targets)
