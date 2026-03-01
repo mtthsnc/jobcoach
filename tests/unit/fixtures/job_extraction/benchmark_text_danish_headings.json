@@ -1,0 +1,9 @@
+{
+  "case_id": "text_danish_headings",
+  "source_type": "text",
+  "source_value": "AI & Automation Lead\nDine ansvarsområder:\n- Orkestrere AI og automatiseringer.\n- Drifte løsningerne og træne kolleger.\nHvem er du?\n- Erfaring med AI, automatisering, systemer og workflows.\nDet vi tilbyder\n- Stor frihed under ansvar.\nOm virksomheden\n- International D2C e-commerce virksomhed.\nAnsøgning\n- Jobbet søges via QuickApply.",
+  "expected_role_title": "AI & Automation Lead",
+  "expected_sections": ["responsibilities", "requirements", "benefits", "company", "application"],
+  "min_sections": 5,
+  "expected_normalized_skill_ids": []
+}

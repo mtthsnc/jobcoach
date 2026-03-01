@@ -5,6 +5,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -81,6 +82,53 @@ class JobExtractionWorkerBenchmarkTest(unittest.TestCase):
                 if source_type == "url":
                     self.assertNotIn("<", result.cleaned_text)
                     self.assertNotIn(">", result.cleaned_text)
+
+    def test_url_fetcher_uses_defuddle_when_available(self) -> None:
+        completed = self.worker_module.subprocess.CompletedProcess(
+            args=["node"],
+            returncode=0,
+            stdout='{"title":"AI Automation Lead","content":"Responsibilities\\n- Build workflows"}',
+            stderr="",
+        )
+        with mock.patch.object(self.worker_module.subprocess, "run", return_value=completed) as run_mock:
+            fetcher = self.worker_module.UrlContentFetcher(
+                prefer_defuddle=True,
+                defuddle_script=WORKER_PATH,
+                node_binary="node",
+            )
+            extracted = fetcher.fetch_url("https://example.com/job")
+
+        self.assertIn("AI Automation Lead", extracted)
+        self.assertIn("Build workflows", extracted)
+        run_mock.assert_called_once()
+
+    def test_url_fetcher_falls_back_to_urllib_when_defuddle_fails(self) -> None:
+        completed = self.worker_module.subprocess.CompletedProcess(
+            args=["node"],
+            returncode=1,
+            stdout="",
+            stderr="boom",
+        )
+        response = mock.MagicMock()
+        response.read.return_value = b"<html><body><h1>Fallback Role</h1></body></html>"
+        response.headers.get_content_charset.return_value = "utf-8"
+        context = mock.MagicMock()
+        context.__enter__.return_value = response
+        context.__exit__.return_value = False
+
+        with (
+            mock.patch.object(self.worker_module.subprocess, "run", return_value=completed),
+            mock.patch.object(self.worker_module.urllib.request, "urlopen", return_value=context) as urlopen_mock,
+        ):
+            fetcher = self.worker_module.UrlContentFetcher(
+                prefer_defuddle=True,
+                defuddle_script=WORKER_PATH,
+                node_binary="node",
+            )
+            extracted = fetcher.fetch_url("https://example.com/job")
+
+        self.assertIn("Fallback Role", extracted)
+        urlopen_mock.assert_called_once()
 
 
 if __name__ == "__main__":

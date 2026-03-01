@@ -1,0 +1,11 @@
+{
+  "name": "jobcoach-defuddle-runner",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Defuddle wrapper used by job extraction worker.",
+  "dependencies": {
+    "defuddle": "^0.2.1",
+    "jsdom": "^24.1.3"
+  }
+}

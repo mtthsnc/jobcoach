@@ -13,10 +13,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash curl make ruby tini \
+    && apt-get install -y --no-install-recommends bash curl make nodejs npm ruby tini \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . /app
+
+RUN npm --prefix /app/tools/defuddle install --omit=dev --no-audit --no-fund
 
 RUN useradd --create-home --shell /bin/bash --uid 10001 appuser \
     && mkdir -p /data /app/.tmp \
