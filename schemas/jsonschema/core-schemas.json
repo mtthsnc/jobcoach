@@ -256,6 +256,9 @@
         "leverage_signals",
         "risk_signals",
         "evidence_links",
+        "anchor_band",
+        "concession_ladder",
+        "objection_playbook",
         "talking_points",
         "follow_up_actions",
         "generated_at"
@@ -327,6 +330,54 @@
               "source_type": { "type": "string" },
               "source_id": { "type": "string" },
               "detail": { "type": "string" }
+            }
+          }
+        },
+        "anchor_band": {
+          "type": "object",
+          "required": [
+            "currency",
+            "floor_base_salary",
+            "target_base_salary",
+            "ceiling_base_salary",
+            "rationale"
+          ],
+          "properties": {
+            "currency": { "type": "string" },
+            "floor_base_salary": { "type": "integer", "minimum": 0 },
+            "target_base_salary": { "type": "integer", "minimum": 0 },
+            "ceiling_base_salary": { "type": "integer", "minimum": 0 },
+            "rationale": { "type": "string" }
+          }
+        },
+        "concession_ladder": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["step", "ask_base_salary", "trigger", "concession", "exchange_for", "evidence"],
+            "properties": {
+              "step": { "type": "integer", "minimum": 1 },
+              "ask_base_salary": { "type": "integer", "minimum": 0 },
+              "trigger": { "type": "string" },
+              "concession": { "type": "string" },
+              "exchange_for": { "type": "string" },
+              "evidence": { "type": "string" }
+            }
+          }
+        },
+        "objection_playbook": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["risk_signal", "objection", "response", "evidence", "fallback_trade"],
+            "properties": {
+              "risk_signal": { "type": "string" },
+              "objection": { "type": "string" },
+              "response": { "type": "string" },
+              "evidence": { "type": "string" },
+              "fallback_trade": { "type": "string" }
             }
           }
         },
