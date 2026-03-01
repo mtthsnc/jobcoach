@@ -36,6 +36,32 @@
       "detail": "Offer context with target and current compensation."
     }
   ],
+  "anchor_band": {
+    "currency": "USD",
+    "floor_base_salary": 165000,
+    "target_base_salary": 185000,
+    "ceiling_base_salary": 190000,
+    "rationale": "Anchor high, settle near target, and hold floor with readiness evidence."
+  },
+  "concession_ladder": [
+    {
+      "step": 1,
+      "ask_base_salary": 190000,
+      "trigger": "If employer raises budget concerns.",
+      "concession": "Offer timing flexibility while holding scope expectations.",
+      "exchange_for": "Documented six-month compensation review and level alignment.",
+      "evidence": "Trajectory readiness and interview momentum justify top-of-band anchoring."
+    }
+  ],
+  "objection_playbook": [
+    {
+      "risk_signal": "compensation_compression",
+      "objection": "The ask is above our planned salary range.",
+      "response": "Position ask within market-backed band and tie to proven delivery outcomes.",
+      "evidence": "Offer spread and trajectory readiness indicate sustainable impact at requested level.",
+      "fallback_trade": "If base is fixed, request sign-on and documented review timeline."
+    }
+  ],
   "talking_points": [
     "Highlight measurable impact from last two roles."
   ],

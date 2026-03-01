@@ -1153,6 +1153,19 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertGreaterEqual(len(plan.get("risk_signals", [])), 1)
         self.assertIsInstance(plan.get("evidence_links"), list)
         self.assertGreaterEqual(len(plan.get("evidence_links", [])), 1)
+        anchor_band = plan.get("anchor_band")
+        self.assertIsInstance(anchor_band, dict)
+        assert isinstance(anchor_band, dict)
+        self.assertEqual(anchor_band.get("currency"), "USD")
+        self.assertLessEqual(anchor_band.get("floor_base_salary", 0), anchor_band.get("target_base_salary", 0))
+        self.assertLessEqual(anchor_band.get("target_base_salary", 0), anchor_band.get("ceiling_base_salary", 0))
+        concession_ladder = plan.get("concession_ladder")
+        self.assertIsInstance(concession_ladder, list)
+        assert isinstance(concession_ladder, list)
+        self.assertGreaterEqual(len(concession_ladder), 1)
+        self.assertEqual([item.get("step") for item in concession_ladder], list(range(1, len(concession_ladder) + 1)))
+        self.assertIsInstance(plan.get("objection_playbook"), list)
+        self.assertGreaterEqual(len(plan.get("objection_playbook", [])), 1)
         self.assertIsInstance(plan.get("talking_points"), list)
         self.assertGreaterEqual(len(plan.get("talking_points", [])), 1)
         self.assertIsInstance(plan.get("follow_up_actions"), list)
@@ -1197,6 +1210,9 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertEqual(get_body["data"].get("leverage_signals"), plan.get("leverage_signals"))
         self.assertEqual(get_body["data"].get("risk_signals"), plan.get("risk_signals"))
         self.assertEqual(get_body["data"].get("evidence_links"), plan.get("evidence_links"))
+        self.assertEqual(get_body["data"].get("anchor_band"), plan.get("anchor_band"))
+        self.assertEqual(get_body["data"].get("concession_ladder"), plan.get("concession_ladder"))
+        self.assertEqual(get_body["data"].get("objection_playbook"), plan.get("objection_playbook"))
 
     def test_negotiation_plan_context_is_deterministic_for_fixed_history(self) -> None:
         _, job_spec_id = self._create_job_spec()
@@ -1280,6 +1296,9 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertEqual(second_plan.get("leverage_signals"), first_plan.get("leverage_signals"))
         self.assertEqual(second_plan.get("risk_signals"), first_plan.get("risk_signals"))
         self.assertEqual(second_plan.get("evidence_links"), first_plan.get("evidence_links"))
+        self.assertEqual(second_plan.get("anchor_band"), first_plan.get("anchor_band"))
+        self.assertEqual(second_plan.get("concession_ladder"), first_plan.get("concession_ladder"))
+        self.assertEqual(second_plan.get("objection_playbook"), first_plan.get("objection_playbook"))
 
         compensation_targets = first_plan.get("compensation_targets", {})
         self.assertIsInstance(compensation_targets, dict)
@@ -1290,6 +1309,12 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertLessEqual(compensation_targets.get("recommended_counter_base_salary", 0), compensation_targets.get("anchor_base_salary", 0))
         self.assertGreaterEqual(float(compensation_targets.get("confidence", 0.0)), 0.5)
         self.assertLessEqual(float(compensation_targets.get("confidence", 0.0)), 1.0)
+
+        anchor_band = first_plan.get("anchor_band", {})
+        self.assertIsInstance(anchor_band, dict)
+        assert isinstance(anchor_band, dict)
+        self.assertLessEqual(anchor_band.get("floor_base_salary", 0), anchor_band.get("target_base_salary", 0))
+        self.assertLessEqual(anchor_band.get("target_base_salary", 0), anchor_band.get("ceiling_base_salary", 0))
 
     def test_negotiation_plan_endpoints_validate_request_shape_and_idempotency(self) -> None:
         _, candidate_id = self._create_candidate_profile()
