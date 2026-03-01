@@ -2,38 +2,35 @@
 
 ## Active Milestone
 
-`M7` (Execution)
+`M8` (Planning)
 
 ## Active Task
 
-- Task ID: `M7-CLOSE-001`
-- Task: Run final M7 stabilization sweep + release notes and close milestone.
-- Why now: `M7-006` is complete with benchmark gate + CI wiring validated, so M7 can be formally closed with a final verification pass, release-note capture, and handoff pointer to M8 planning.
+- Task ID: `M8-PLAN-001`
+- Task: Define executable M8 backlog with dependencies and acceptance criteria.
+- Why now: `M7-CLOSE-001` is complete with final validation evidence and release notes recorded, so the next critical path is planning M8 into concrete executable tasks.
 
 ## Exact Next Steps
 
-1. Execute final M7 stabilization validation sequence:
-   - `make test`
-   - `make validate-openapi`
-   - `make migrate-up`
-   - `make migrate-down`
-   - `JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test`
-2. Publish M7 closeout notes:
-   - summarize shipped M7 scope (`M7-001`..`M7-006`) and quality-gate outcomes,
-   - record benchmark/contract validation evidence and environment caveats (sandbox elevated bind for contract tests).
-3. Advance planning pointers:
-   - mark `M7-CLOSE-001` as `DONE` in `docs/tasklist.md`,
-   - move `docs/NEXT_ACTION.md` active pointer to `M8-PLAN-001`.
+1. Define M8 implementation scope and sequence:
+   - identify M8 objective and contract/runtime surfaces from current roadmap,
+   - break scope into executable tasks (`M8-001`..`M8-00N`) with dependency ordering.
+2. Update planning artifacts:
+   - add M8 tasks to `docs/tasklist.md` with priority, dependencies, and explicit acceptance criteria,
+   - ensure only `M8-PLAN-001` is closed when the task graph is complete.
+3. Record planning decisions + handoff:
+   - document planning rationale in `docs/decision-log.md` if task boundaries or ordering introduce new architectural/operational decisions,
+   - append START/END evidence in `docs/work-log.md`,
+   - move pointer to the first executable M8 task after plan completion.
 
 ## Validation Required
 
-- Confirm M7 closeout artifacts are complete and actionable:
-  - All M7 tasks are marked `DONE` with evidence.
-  - Benchmark and contract quality gates remain green in this environment.
-  - Closeout/release-note documentation is recorded.
-  - Full validation suite passes in this environment (with documented contract-test port override/elevated run as needed).
-  - `docs/work-log.md` records closeout execution evidence and `docs/NEXT_ACTION.md` advances to `M8-PLAN-001`.
+- Confirm M8 planning artifacts are complete and actionable:
+  - `docs/tasklist.md` contains a complete M8 task graph with dependencies and acceptance criteria.
+  - The first executable M8 task is clearly identified and set as next pointer.
+  - `docs/work-log.md` captures planning execution evidence.
+  - Any significant planning/architecture rationale is logged in `docs/decision-log.md`.
 
 ## Return Pointer
 
-After `M7-CLOSE-001` is complete, execute `M8-PLAN-001`.
+After `M8-PLAN-001` is complete, execute the first executable M8 implementation task.

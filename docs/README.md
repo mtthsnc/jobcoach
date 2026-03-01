@@ -20,6 +20,8 @@ If chat context runs out, a new session should resume by following this exact or
 - `docs/implementation-plan.md`: Phase-by-phase engineering plan with acceptance gates.
 - `docs/monorepo-fresh-context.md`: Restart playbook for monorepo transition, then return to roadmap tasks.
 - `docs/monorepo-phase-a-freeze.md`: Phase A freeze snapshot (checksums, references, and old->new path mapping).
+- `docs/m6-release-notes.md`: M6 closeout summary (scope delivered, validations, gates, and environment caveats).
+- `docs/m7-release-notes.md`: M7 closeout summary (scope delivered, validations, gates, and environment caveats).
 - `docs/tasklist.md`: Executable backlog with priorities, dependencies, and status.
 - `docs/session-continuity.md`: How to resume/close sessions safely.
 - `docs/NEXT_ACTION.md`: Single canonical "what to do next" pointer.
