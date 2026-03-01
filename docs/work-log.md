@@ -2156,3 +2156,55 @@ Use UTC timestamps. Append entries only.
   - In this environment, contract tests require elevated execution to bind the local API process port.
 - Next pointer:
   - Execute `M7-005` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T20:05:10Z
+- Execute `M7-005` eval-run lifecycle outbox events.
+- Task IDs: M7-005
+- Changes made:
+  - Started implementation for deterministic eval-run lifecycle outbox event persistence and retry-safe duplicate suppression on replay/terminal retries.
+- Validation evidence:
+  - Planned: targeted eval repository + API unit/contract checks, then full `make test`, `make validate-openapi`, migrate up/down, and `make contract-test`.
+- Blockers / risks:
+  - Contract tests expected to require elevated execution in this sandbox due local API bind restrictions.
+- Next pointer:
+  - Complete M7-005 implementation/tests and advance pointer to `M7-006`.
+
+- END
+- 2026-03-01T20:18:09Z
+- Execute `M7-005` eval-run lifecycle outbox events.
+- Task IDs: M7-005
+- Changes made:
+  - Implemented eval-run lifecycle outbox emission in `apps/api-gateway/api_gateway/repository.py`:
+    - enqueue `eval_run.queued` event on created eval runs,
+    - enqueue `eval_run.succeeded` / `eval_run.failed` on first terminal transition only,
+    - deterministic event IDs (`evt_eval_run_{eval_run_id}_{status}`) with `INSERT OR IGNORE` for retry-safe deduplication,
+    - deterministic event payloads with lifecycle timestamps and terminal metrics/error context.
+  - Added repository-level deterministic coverage in `tests/unit/test_eval_run_repository.py`:
+    - created/replay/conflict outbox dedup semantics,
+    - terminal transition event payload coverage (succeeded/failed),
+    - terminal retry does not duplicate outbox events.
+  - Extended API unit coverage in `tests/unit/test_job_spec_persistence.py`:
+    - `/v1/evals/run` now asserts persisted queued + terminal outbox lifecycle events,
+    - replay/conflict flow asserts no duplicate lifecycle events.
+  - Extended API contract coverage in `tests/contracts/test_job_ingestions_api_contract.py`:
+    - lifecycle outbox persistence assertions for eval-run create flow,
+    - replay/conflict contract validates no duplicate lifecycle event emission.
+  - Updated planning/docs:
+    - `docs/tasklist.md`: marked `M7-005` as `DONE`, advanced NEXT queue to `M7-006` then `M7-CLOSE-001`.
+    - `docs/NEXT_ACTION.md`: advanced active pointer to `M7-006`.
+    - `docs/api-surface.md`: documented internal eval lifecycle outbox event types.
+    - `docs/decision-log.md`: added `DEC-022` for deterministic eval lifecycle outbox emission + dedup strategy.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_eval_run_repository.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_run_eval_endpoint_queues_request_and_persists_terminal_metrics tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_run_eval_endpoint_idempotency_replay_and_conflict`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_run_eval_contract_persists_terminal_metrics tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_run_eval_idempotency_replay_and_conflict_contract` (initial sandbox bind failure; pass on elevated rerun)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 make test` (pass)
+  - `make validate-openapi` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m7-005-migrate-up.sqlite3 make migrate-up` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m7-005-migrate-down.sqlite3 make migrate-down` (pass)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test` (initial sandbox bind failure; pass on elevated rerun)
+- Blockers / risks:
+  - In this environment, contract tests require elevated execution to bind the local API process port.
+- Next pointer:
+  - Execute `M7-006` from `docs/NEXT_ACTION.md`.

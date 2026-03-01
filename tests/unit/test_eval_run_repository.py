@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import sys
@@ -79,6 +80,27 @@ class EvalRunRepositoryTest(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmpdir.cleanup()
 
+    def _load_eval_run_outbox_events(self, *, eval_run_id: str) -> list[sqlite3.Row]:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT
+                    event_id,
+                    aggregate_type,
+                    aggregate_id,
+                    event_type,
+                    payload_json,
+                    status,
+                    available_at
+                FROM outbox_events
+                WHERE aggregate_type = 'eval_run' AND aggregate_id = ?
+                ORDER BY created_at ASC, event_id ASC
+                """,
+                (eval_run_id,),
+            ).fetchall()
+        return rows
+
     def test_eval_runs_table_accepts_expanded_suite_catalog(self) -> None:
         with closing(sqlite3.connect(self.db_path)) as conn:
             for idx, suite in enumerate(EVAL_SUITES):
@@ -117,6 +139,7 @@ class EvalRunRepositoryTest(unittest.TestCase):
         created_run_id = create_result.eval_run.get("eval_run_id")
         self.assertIsInstance(created_run_id, str)
         self.assertTrue(created_run_id)
+        assert isinstance(created_run_id, str)
         self.assertEqual(create_result.eval_run.get("suite"), "feedback_quality_v1")
         self.assertEqual(create_result.eval_run.get("status"), "queued")
         self.assertEqual(create_result.eval_run.get("metrics"), {})
@@ -148,6 +171,22 @@ class EvalRunRepositoryTest(unittest.TestCase):
         self.assertIsNotNone(row)
         assert row is not None
         self.assertEqual(int(row[0]), 1)
+
+        outbox_rows = self._load_eval_run_outbox_events(eval_run_id=created_run_id)
+        self.assertEqual(len(outbox_rows), 1)
+        queued_row = outbox_rows[0]
+        self.assertEqual(queued_row["event_id"], f"evt_eval_run_{created_run_id}_queued")
+        self.assertEqual(queued_row["event_type"], "eval_run.queued")
+        self.assertEqual(queued_row["aggregate_type"], "eval_run")
+        self.assertEqual(queued_row["aggregate_id"], created_run_id)
+        self.assertEqual(queued_row["status"], "pending")
+        queued_payload = json.loads(str(queued_row["payload_json"]))
+        self.assertEqual(queued_payload.get("eval_run_id"), created_run_id)
+        self.assertEqual(queued_payload.get("suite"), "feedback_quality_v1")
+        self.assertEqual(queued_payload.get("status"), "queued")
+        self.assertIn("created_at", queued_payload)
+        self.assertNotIn("metrics", queued_payload)
+        self.assertNotIn("error", queued_payload)
 
     def test_get_eval_run_by_id_returns_persisted_payload_and_none_for_unknown(self) -> None:
         create_result = self.repository.create_or_get_eval_run(
@@ -206,6 +245,16 @@ class EvalRunRepositoryTest(unittest.TestCase):
         self.assertEqual(terminal_payload.get("metrics"), succeeded_metrics)
         self.assertIsInstance(terminal_payload.get("completed_at"), str)
         self.assertIsNone(terminal_payload.get("error"))
+        succeeded_outbox = self._load_eval_run_outbox_events(eval_run_id=eval_run_id)
+        self.assertEqual(
+            {str(row["event_type"]) for row in succeeded_outbox},
+            {"eval_run.queued", "eval_run.succeeded"},
+        )
+        succeeded_terminal_row = next(row for row in succeeded_outbox if row["event_type"] == "eval_run.succeeded")
+        succeeded_terminal_payload = json.loads(str(succeeded_terminal_row["payload_json"]))
+        self.assertEqual(succeeded_terminal_payload.get("status"), "succeeded")
+        self.assertEqual(succeeded_terminal_payload.get("metrics"), succeeded_metrics)
+        self.assertNotIn("error", succeeded_terminal_payload)
 
         failed_create = self.repository.create_or_get_eval_run(
             idempotency_key="eval-transition-002",
@@ -242,6 +291,74 @@ class EvalRunRepositoryTest(unittest.TestCase):
         )
         self.assertIsInstance(failed_payload.get("started_at"), str)
         self.assertIsInstance(failed_payload.get("completed_at"), str)
+        failed_outbox = self._load_eval_run_outbox_events(eval_run_id=failed_eval_run_id)
+        self.assertEqual(
+            {str(row["event_type"]) for row in failed_outbox},
+            {"eval_run.queued", "eval_run.failed"},
+        )
+        failed_terminal_row = next(row for row in failed_outbox if row["event_type"] == "eval_run.failed")
+        failed_terminal_payload = json.loads(str(failed_terminal_row["payload_json"]))
+        self.assertEqual(failed_terminal_payload.get("status"), "failed")
+        self.assertEqual(failed_terminal_payload.get("metrics"), failed_metrics)
+        self.assertEqual(
+            failed_terminal_payload.get("error"),
+            {"code": "benchmark_threshold_failed", "message": "Threshold gate not satisfied"},
+        )
+
+    def test_complete_eval_run_terminal_event_is_not_duplicated_on_retry(self) -> None:
+        create_result = self.repository.create_or_get_eval_run(
+            idempotency_key="eval-terminal-dedup-001",
+            request_payload={"suite": "trajectory_quality_v1"},
+            suite="trajectory_quality_v1",
+        )
+        self.assertEqual(create_result.status, "created")
+        assert create_result.eval_run is not None
+        eval_run_id = str(create_result.eval_run["eval_run_id"])
+
+        self.repository.mark_eval_run_running(eval_run_id=eval_run_id)
+        first_terminal_payload = self.repository.complete_eval_run(
+            eval_run_id=eval_run_id,
+            status="failed",
+            metrics={
+                "suite": "trajectory_quality_v1",
+                "passed": False,
+                "aggregate": {"overall_trajectory_quality": 0.8},
+                "failed_threshold_count": 1,
+                "failed_threshold_metrics": ["overall_trajectory_quality"],
+                "case_count": 4,
+            },
+            error_code="benchmark_threshold_failed",
+            error_message="Threshold gate not satisfied",
+        )
+        self.assertIsNotNone(first_terminal_payload)
+
+        retry_terminal_payload = self.repository.complete_eval_run(
+            eval_run_id=eval_run_id,
+            status="failed",
+            metrics={
+                "suite": "trajectory_quality_v1",
+                "passed": False,
+                "aggregate": {"overall_trajectory_quality": 0.1},
+                "failed_threshold_count": 1,
+                "failed_threshold_metrics": ["overall_trajectory_quality"],
+                "case_count": 4,
+            },
+            error_code="other_error_code",
+            error_message="Should not overwrite terminal state",
+        )
+        self.assertIsNotNone(retry_terminal_payload)
+        assert retry_terminal_payload is not None
+        self.assertEqual(retry_terminal_payload.get("status"), "failed")
+        self.assertEqual(
+            retry_terminal_payload.get("error"),
+            {"code": "benchmark_threshold_failed", "message": "Threshold gate not satisfied"},
+        )
+
+        outbox_rows = self._load_eval_run_outbox_events(eval_run_id=eval_run_id)
+        self.assertEqual(
+            {str(row["event_type"]) for row in outbox_rows},
+            {"eval_run.queued", "eval_run.failed"},
+        )
 
     def test_validate_run_eval_request_payload_accepts_expanded_suites(self) -> None:
         for suite in EVAL_SUITES:

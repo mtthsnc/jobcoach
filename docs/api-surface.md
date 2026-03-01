@@ -27,3 +27,9 @@ Runtime base path: `/v1`
 
 - OpenAPI: `schemas/openapi/openapi.yaml`
 - JSON Schema: `schemas/jsonschema/core-schemas.json`
+
+## Internal Outbox Lifecycle Events
+
+- `eval_run.queued`
+- `eval_run.succeeded`
+- `eval_run.failed`

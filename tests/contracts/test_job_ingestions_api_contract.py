@@ -402,11 +402,16 @@ class JobIngestionApiContractTest(unittest.TestCase):
         assert isinstance(eval_run_id, str)
         self._assert_meta(body.get("meta", {}))
 
-        self._assert_eval_run_row_persisted(
+        terminal_status = self._assert_eval_run_row_persisted(
             eval_run_id=eval_run_id,
             suite=suite,
             idempotency_key=idempotency_key,
             request_payload={"suite": suite},
+        )
+        self._assert_eval_run_outbox_lifecycle_events(
+            eval_run_id=eval_run_id,
+            suite=suite,
+            terminal_status=terminal_status,
         )
 
     def test_run_eval_idempotency_replay_and_conflict_contract(self) -> None:
@@ -444,6 +449,17 @@ class JobIngestionApiContractTest(unittest.TestCase):
         )
         self.assertEqual(conflict_status, 409, conflict_body)
         self.assertEqual(conflict_body.get("error", {}).get("code"), "idempotency_key_conflict")
+        terminal_status = self._assert_eval_run_row_persisted(
+            eval_run_id=first_run_id,
+            suite="feedback_quality_v1",
+            idempotency_key=idempotency_key,
+            request_payload={"suite": "feedback_quality_v1"},
+        )
+        self._assert_eval_run_outbox_lifecycle_events(
+            eval_run_id=first_run_id,
+            suite="feedback_quality_v1",
+            terminal_status=terminal_status,
+        )
 
     def test_run_eval_validation_contract(self) -> None:
         missing_header_status, missing_header_body = _request_json(
@@ -2788,7 +2804,7 @@ class JobIngestionApiContractTest(unittest.TestCase):
         suite: str,
         idempotency_key: str,
         request_payload: dict[str, str],
-    ) -> None:
+    ) -> str:
         deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
         row = None
         while time.monotonic() < deadline:
@@ -2832,6 +2848,67 @@ class JobIngestionApiContractTest(unittest.TestCase):
             self.assertTrue(row[6])
         self.assertIsNotNone(row[8])
         self.assertIsNotNone(row[9])
+        return str(row[2])
+
+    def _assert_eval_run_outbox_lifecycle_events(
+        self,
+        *,
+        eval_run_id: str,
+        suite: str,
+        terminal_status: str,
+    ) -> None:
+        self.assertIn(terminal_status, {"succeeded", "failed"})
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            rows = conn.execute(
+                """
+                SELECT event_id, aggregate_type, aggregate_id, event_type, payload_json, status
+                FROM outbox_events
+                WHERE aggregate_type = 'eval_run' AND aggregate_id = ?
+                ORDER BY created_at ASC, event_id ASC
+                """,
+                (eval_run_id,),
+            ).fetchall()
+
+        self.assertEqual(len(rows), 2, f"Unexpected outbox event count for eval_run_id={eval_run_id}")
+        rows_by_event_type = {str(row[3]): row for row in rows}
+        self.assertIn("eval_run.queued", rows_by_event_type)
+        self.assertIn(f"eval_run.{terminal_status}", rows_by_event_type)
+        queued_row = rows_by_event_type["eval_run.queued"]
+        terminal_row = rows_by_event_type[f"eval_run.{terminal_status}"]
+
+        self.assertEqual(queued_row[0], f"evt_eval_run_{eval_run_id}_queued")
+        self.assertEqual(queued_row[1], "eval_run")
+        self.assertEqual(queued_row[2], eval_run_id)
+        self.assertEqual(queued_row[3], "eval_run.queued")
+        self.assertEqual(queued_row[5], "pending")
+        queued_payload = json.loads(str(queued_row[4]))
+        self.assertEqual(queued_payload.get("eval_run_id"), eval_run_id)
+        self.assertEqual(queued_payload.get("suite"), suite)
+        self.assertEqual(queued_payload.get("status"), "queued")
+        self.assertIn("created_at", queued_payload)
+        self.assertNotIn("metrics", queued_payload)
+        self.assertNotIn("error", queued_payload)
+
+        self.assertEqual(terminal_row[0], f"evt_eval_run_{eval_run_id}_{terminal_status}")
+        self.assertEqual(terminal_row[1], "eval_run")
+        self.assertEqual(terminal_row[2], eval_run_id)
+        self.assertEqual(terminal_row[3], f"eval_run.{terminal_status}")
+        self.assertEqual(terminal_row[5], "pending")
+        terminal_payload = json.loads(str(terminal_row[4]))
+        self.assertEqual(terminal_payload.get("eval_run_id"), eval_run_id)
+        self.assertEqual(terminal_payload.get("suite"), suite)
+        self.assertEqual(terminal_payload.get("status"), terminal_status)
+        self.assertIn("metrics", terminal_payload)
+        self.assertIsInstance(terminal_payload.get("metrics"), dict)
+        self.assertEqual(terminal_payload["metrics"].get("suite"), suite)
+        self.assertIn("created_at", terminal_payload)
+        self.assertIn("started_at", terminal_payload)
+        self.assertIn("completed_at", terminal_payload)
+        if terminal_status == "failed":
+            self.assertIsInstance(terminal_payload.get("error"), dict)
+        else:
+            self.assertNotIn("error", terminal_payload)
 
     def _seed_eval_run_row(
         self,

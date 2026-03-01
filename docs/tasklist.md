@@ -64,15 +64,15 @@ Status legend: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`
 | M7-002 | DONE | P0 | M7 | Expand eval-run orchestration contracts/storage to support benchmark suite catalog and idempotent run requests | M7-PLAN-001 | OpenAPI + migration + repository semantics support versioned suite catalog and idempotent eval-run creation |
 | M7-003 | DONE | P0 | M7 | Implement `POST /evals/run` orchestration flow (queued->running->terminal state transitions + metrics capture) | M7-002 | Eval run create returns `202 queued`, persists run state transitions, and deterministic executor unit tests pass |
 | M7-004 | DONE | P0 | M7 | Implement `GET /evals/{eval_run_id}` retrieval endpoint with schema-valid status/metrics/error payloads | M7-003 | Eval run GET contract tests cover queued/running/succeeded/failed and not-found behaviors |
-| M7-005 | TODO | P1 | M7 | Emit outbox lifecycle events for eval runs (queued/succeeded/failed) with retry-safe publication semantics | M7-003,M0-005 | Eval lifecycle events persist with deterministic payloads and retry/publish tests pass |
+| M7-005 | DONE | P1 | M7 | Emit outbox lifecycle events for eval runs (queued/succeeded/failed) with retry-safe publication semantics | M7-003,M0-005 | Eval lifecycle events persist with deterministic payloads and retry/publish tests pass |
 | M7-006 | TODO | P0 | M7 | Add eval-orchestration quality benchmark + CI/local threshold gate | M7-004,M7-005,M0-006 | Benchmark report emitted in CI/local and fails on status-transition/idempotency/metrics regressions |
 | M7-CLOSE-001 | TODO | P1 | M7 | Run final M7 stabilization sweep + release notes and close milestone | M7-006 | Full validation suite passes and M7 closeout notes are recorded with next-milestone handoff pointer |
 | M8-PLAN-001 | TODO | P0 | M8 | Define executable M8 backlog with dependencies and acceptance criteria | M7-CLOSE-001 | M8 task graph is committed and NEXT pointer targets first executable M8 task |
 
 ## NEXT
 
-- `NEXT-1`: Execute `M7-005` (eval-run lifecycle outbox events).
-- `NEXT-2`: Execute `M7-006` (eval-orchestration quality benchmark + threshold gate).
+- `NEXT-1`: Execute `M7-006` (eval-orchestration quality benchmark + threshold gate).
+- `NEXT-2`: Execute `M7-CLOSE-001` (M7 stabilization sweep + release-note closeout).
 
 ## Backlog (Future Milestones)
 

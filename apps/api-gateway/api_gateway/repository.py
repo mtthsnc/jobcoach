@@ -437,9 +437,17 @@ class SQLiteJobIngestionRepository:
                 ).fetchone()
                 if created_row is None:
                     raise RuntimeError("Inserted eval run row could not be loaded")
+                created_payload = _row_to_eval_run(created_row)
+                if created_payload is None:
+                    raise RuntimeError("Inserted eval run payload could not be normalized")
+                self._enqueue_eval_run_lifecycle_event(
+                    connection=connection,
+                    eval_run_payload=created_payload,
+                    lifecycle_status="queued",
+                )
                 return EvalRunCreateResult(
                     status="created",
-                    eval_run=_row_to_eval_run(created_row),
+                    eval_run=created_payload,
                 )
 
     def get_eval_run_by_id(self, eval_run_id: str) -> dict[str, Any] | None:
@@ -527,7 +535,7 @@ class SQLiteJobIngestionRepository:
 
         with closing(self._connect()) as connection:
             with connection:
-                connection.execute(
+                transition_cursor = connection.execute(
                     """
                     UPDATE eval_runs
                     SET status = ?,
@@ -564,8 +572,60 @@ class SQLiteJobIngestionRepository:
                     """,
                     (normalized_eval_run_id,),
                 ).fetchone()
+                payload = _row_to_eval_run(row) if row is not None else None
+                if transition_cursor.rowcount == 1 and payload is not None:
+                    self._enqueue_eval_run_lifecycle_event(
+                        connection=connection,
+                        eval_run_payload=payload,
+                        lifecycle_status=normalized_status,
+                    )
 
-        return _row_to_eval_run(row) if row is not None else None
+        return payload
+
+    def _enqueue_eval_run_lifecycle_event(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        eval_run_payload: dict[str, Any],
+        lifecycle_status: str,
+    ) -> None:
+        normalized_status = str(lifecycle_status).strip()
+        if normalized_status not in {"queued", "succeeded", "failed"}:
+            raise ValueError("lifecycle_status must be one of: queued, succeeded, failed")
+
+        eval_run_id = str(eval_run_payload.get("eval_run_id", "")).strip()
+        suite = str(eval_run_payload.get("suite", "")).strip()
+        if not eval_run_id or not suite:
+            raise ValueError("eval_run_payload must include eval_run_id and suite")
+
+        event_id = _build_eval_run_lifecycle_event_id(eval_run_id=eval_run_id, status=normalized_status)
+        event_type = f"eval_run.{normalized_status}"
+        payload = _build_eval_run_lifecycle_event_payload(
+            eval_run_payload=eval_run_payload,
+            lifecycle_status=normalized_status,
+        )
+        available_at_raw = payload.get("completed_at") or payload.get("started_at") or payload.get("created_at")
+        available_at = str(available_at_raw) if isinstance(available_at_raw, str) and available_at_raw.strip() else None
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO outbox_events (
+                event_id,
+                aggregate_type,
+                aggregate_id,
+                event_type,
+                payload_json,
+                available_at
+            )
+            VALUES (?, 'eval_run', ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            """,
+            (
+                event_id,
+                eval_run_id,
+                event_type,
+                _canonical_json(payload),
+                available_at,
+            ),
+        )
 
     def persist_candidate_profile(self, *, ingestion_id: str, candidate_profile: dict[str, Any]) -> str:
         target_roles = candidate_profile.get("target_roles")
@@ -1863,6 +1923,38 @@ def _decode_json_object(raw: str) -> dict[str, Any]:
 def _decode_json_string_list(raw: str) -> list[str]:
     decoded = _decode_json_list(raw)
     return [value for value in decoded if isinstance(value, str)]
+
+
+def _build_eval_run_lifecycle_event_id(*, eval_run_id: str, status: str) -> str:
+    return f"evt_eval_run_{eval_run_id}_{status}"
+
+
+def _build_eval_run_lifecycle_event_payload(
+    *,
+    eval_run_payload: dict[str, Any],
+    lifecycle_status: str,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "eval_run_id": str(eval_run_payload.get("eval_run_id", "")),
+        "suite": str(eval_run_payload.get("suite", "")),
+        "status": lifecycle_status,
+    }
+    for field in ("created_at", "started_at", "completed_at"):
+        value = eval_run_payload.get(field)
+        if isinstance(value, str) and value.strip():
+            payload[field] = value
+
+    if lifecycle_status in {"succeeded", "failed"}:
+        metrics = eval_run_payload.get("metrics")
+        payload["metrics"] = metrics if isinstance(metrics, dict) else {}
+        error_payload = eval_run_payload.get("error")
+        if isinstance(error_payload, dict):
+            payload["error"] = {
+                "code": str(error_payload.get("code", "")),
+                "message": str(error_payload.get("message", "")),
+            }
+
+    return payload
 
 
 def _canonical_json(value: Any) -> str:

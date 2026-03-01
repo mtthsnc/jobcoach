@@ -266,3 +266,15 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Recompute synthetic lifecycle state on read instead of returning persisted row state.
   - Restrict GET response to status-only fields and omit terminal metrics/error payloads.
+
+- Decision ID: `DEC-022`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: `M7-005` required publishing eval-run lifecycle outbox events for queued and terminal states while preserving idempotent replay safety and deterministic payload semantics.
+- Decision: Emit lifecycle events inside repository write transactions using deterministic event IDs (`evt_eval_run_{eval_run_id}_{status}`) with `INSERT OR IGNORE`, enqueueing `eval_run.queued` on created runs and `eval_run.succeeded`/`eval_run.failed` only on first terminal transition.
+- Consequences:
+  - Lifecycle outbox emission is retry-safe at the persistence boundary and idempotent replay/conflict requests do not duplicate events.
+  - Event payloads now provide deterministic `eval_run_id`/`suite`/`status` + lifecycle timestamps, and terminal events include persisted metrics/error context for downstream publishers/consumers.
+- Alternatives considered:
+  - Emit lifecycle events in API handlers outside repository transactions, risking write/event divergence on partial failures.
+  - Use non-deterministic UUID event IDs and deduplicate downstream rather than enforcing deterministic persistence-side idempotency.
