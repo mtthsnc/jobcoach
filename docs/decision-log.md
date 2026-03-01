@@ -192,3 +192,77 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Keep a single mutable negotiation row per candidate/role and overwrite in place.
   - Rely on idempotency keys only without explicit version progression and optimistic conflict checks.
+
+- Decision ID: `DEC-016`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: M6-006 required a deterministic quality gate that protects both negotiation strategy outputs and post-interview follow-up plans from regression after versioned persistence semantics were introduced in M6-005.
+- Decision: Add a dedicated negotiation/follow-up benchmark suite with fixture-driven cases (`high_leverage_history`, `high_risk_deadline`, `low_signal_sparse`) and CI/local thresholds for strategy structure quality, follow-up cadence quality, branch/action boundedness, evidence-link consistency, and `NegotiationPlan` schema validity.
+- Consequences:
+  - `make test` and CI now fail fast on regressions in negotiation/follow-up output quality, not just API/contract correctness.
+  - Benchmark fixture maintenance becomes part of intentional negotiation behavior changes.
+- Alternatives considered:
+  - Rely only on existing unit/contract tests without a dedicated negotiation quality benchmark.
+  - Gate only strategy generation and omit follow-up/evidence boundedness checks.
+
+- Decision ID: `DEC-017`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: After M6 closeout, the remaining contract-defined platform surface (`POST /taxonomy/normalize`, `POST /evals/run`, `GET /evals/{eval_run_id}`) is not fully wired in gateway handlers, leaving operational evaluation and taxonomy normalization flows incomplete.
+- Decision: Define M7 as a contract-first hardening milestone focused on taxonomy normalization and eval-run orchestration, decomposed into tasks `M7-001`..`M7-006` (taxonomy endpoint wiring, eval contract/storage expansion, eval run orchestration create/get, eval lifecycle outbox events, and an eval-orchestration benchmark gate).
+- Consequences:
+  - M7 has an explicit critical path that closes currently unwired contract endpoints with deterministic behavior and CI-enforced reliability checks.
+  - Scope is constrained to operational hardening rather than introducing new end-user milestone domains.
+- Alternatives considered:
+  - Start a new product-surface milestone and leave taxonomy/eval endpoints unwired.
+  - Implement eval endpoints ad hoc without a dedicated milestone plan or quality gate.
+
+- Decision ID: `DEC-018`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: `M7-001` required wiring `POST /taxonomy/normalize` while keeping normalization outputs deterministic across repeated requests and future mapping-file changes.
+- Decision: Persist normalized input tokens in `taxonomy_mappings` with a create-or-get (first-write-wins) strategy, and serve subsequent requests from persisted mappings before recomputing normalization.
+- Consequences:
+  - Repeated normalize requests return stable canonical/confidence outputs for the same normalized term.
+  - Mapping evolution requires explicit migration/backfill strategy if previously persisted terms should be remapped.
+- Alternatives considered:
+  - Recompute normalization from mapping files on every request without persistence lookup.
+  - Upsert mappings on every request, allowing canonical/confidence drift over time.
+
+- Decision ID: `DEC-019`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: `M7-002` required expanding eval orchestration foundations so all benchmark gates enforced by `make test` are representable in contracts/storage, while keeping upcoming `POST /evals/run` semantics idempotent and deterministic.
+- Decision: Expand the eval suite catalog to six deterministic suite IDs (`job_extraction_v1`, `candidate_parse_v1`, `interview_relevance_v1`, `feedback_quality_v1`, `trajectory_quality_v1`, `negotiation_quality_v1`), rebuild `eval_runs` via migration with the expanded suite constraint, and add persisted `idempotency_key` + `request_json` semantics with repository create-or-get replay/conflict behavior.
+- Consequences:
+  - Eval-run contracts and SQLite storage now support the full benchmark catalog currently gated by `make test`.
+  - M7-003/M7-004 can implement `POST /evals/run` and `GET /evals/{eval_run_id}` on stable idempotent persistence primitives without schema rework.
+  - Migration surface area increased because SQLite requires table rebuild to evolve suite `CHECK` constraints safely.
+- Alternatives considered:
+  - Keep two-suite catalog and defer the rest to runtime-only validation logic.
+  - Add only suite constraint expansion without idempotency/request persistence and retrofit later during handler wiring.
+
+- Decision ID: `DEC-020`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: `M7-003` required wiring `POST /evals/run` over idempotent eval-run persistence while also recording deterministic lifecycle outcomes (`queued` -> `running` -> terminal) with metrics and failure diagnostics.
+- Decision: Execute eval suites synchronously through deterministic benchmark runners (`run_benchmark`) immediately after persisted run creation, persist terminal status/metrics via repository transition primitives, and keep `POST /v1/evals/run` response contract fixed to `202` with queued acknowledgement payload (`eval_run_id`, `status=queued`).
+- Consequences:
+  - Eval-run rows now capture deterministic terminal metrics/error payloads and lifecycle timestamps in a single request flow.
+  - Idempotent replay returns the same accepted queue payload while preserving first-write terminal state in storage.
+  - `GET /evals/{eval_run_id}` can be implemented next without adding orchestration state machinery.
+- Alternatives considered:
+  - Defer execution to an async worker/outbox flow in M7-003 and keep API create call as persistence-only.
+  - Return terminal status directly from `POST /v1/evals/run`, diverging from queued acceptance contract.
+
+- Decision ID: `DEC-021`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: `M7-004` required exposing persisted eval-run lifecycle state through `GET /evals/{eval_run_id}` with deterministic retrieval semantics, including queued/running/terminal metrics and failure diagnostics.
+- Decision: Wire `GET /v1/evals/{eval_run_id}` directly to repository retrieval (`get_eval_run_by_id`) and return the persisted eval-run payload shape (status, metrics, optional error, lifecycle timestamps), while keeping unknown/invalid route instances on stable `404 not_found` semantics.
+- Consequences:
+  - Clients can deterministically fetch eval-run lifecycle state without recomputing execution state from write-path responses.
+  - Retrieval payload now reflects persisted lifecycle timestamps and terminal error details, requiring OpenAPI schema alignment for `EvalRunResponse`.
+- Alternatives considered:
+  - Recompute synthetic lifecycle state on read instead of returning persisted row state.
+  - Restrict GET response to status-only fields and omit terminal metrics/error payloads.

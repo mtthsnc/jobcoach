@@ -17,6 +17,14 @@ from .repository import CandidateIngestionRecord, JobIngestionRecord, SQLiteJobI
 
 SOURCE_TYPE_VALUES = {"url", "text", "document_ref"}
 INTERVIEW_MODE_VALUES = {"mock_interview", "drill", "negotiation"}
+EVAL_SUITE_VALUES = {
+    "job_extraction_v1",
+    "candidate_parse_v1",
+    "interview_relevance_v1",
+    "feedback_quality_v1",
+    "trajectory_quality_v1",
+    "negotiation_quality_v1",
+}
 ROOT_DIR = Path(__file__).resolve().parents[3]
 JOB_EXTRACTION_PATH = ROOT_DIR / "services" / "job-extraction" / "worker.py"
 TAXONOMY_PATH = ROOT_DIR / "services" / "taxonomy" / "normalizer.py"
@@ -30,11 +38,14 @@ TRAJECTORY_PLANNER_PATH = ROOT_DIR / "services" / "trajectory-planning" / "gener
 NEGOTIATION_CONTEXT_AGGREGATOR_PATH = ROOT_DIR / "services" / "negotiation-planning" / "aggregator.py"
 NEGOTIATION_STRATEGY_GENERATOR_PATH = ROOT_DIR / "services" / "negotiation-planning" / "generator.py"
 NEGOTIATION_FOLLOWUP_PLANNER_PATH = ROOT_DIR / "services" / "negotiation-planning" / "followup.py"
+QUALITY_EVAL_BENCHMARK_DIR = ROOT_DIR / "services" / "quality-eval" / "benchmark"
 INTERVIEW_ROUTE_PREFIX = "/v1/interview-sessions/"
 INTERVIEW_RESPONSES_SUFFIX = "/responses"
 FEEDBACK_ROUTE_PREFIX = "/v1/feedback-reports/"
 NEGOTIATION_ROUTE_PREFIX = "/v1/negotiation-plans/"
 TRAJECTORY_ROUTE_PREFIX = "/v1/trajectory-plans/"
+EVAL_RUN_ROUTE = "/v1/evals/run"
+EVAL_ROUTE_PREFIX = "/v1/evals/"
 JOB_SPEC_ROUTE_PREFIX = "/v1/job-specs/"
 JOB_SPEC_REVIEW_ROUTE_SUFFIX = "/review"
 COMPETENCY_FIT_ROUTE = "/v1/competency-fits"
@@ -42,7 +53,9 @@ CANDIDATE_ROUTE_PREFIX = "/v1/candidates/"
 CANDIDATE_PROFILE_SUFFIX = "/profile"
 CANDIDATE_STORYBANK_SUFFIX = "/storybank"
 CANDIDATE_PROGRESS_DASHBOARD_SUFFIX = "/progress-dashboard"
+TAXONOMY_NORMALIZE_ROUTE = "/v1/taxonomy/normalize"
 FOLLOWUP_OVERRIDE_CONFIDENCE_THRESHOLD = 0.80
+TAXONOMY_VERSION = "m1-taxonomy-v1"
 IMMUTABLE_JOB_SPEC_PATCH_FIELDS = {"job_spec_id", "source", "version"}
 MUTABLE_JOB_SPEC_PATCH_FIELDS = {
     "company",
@@ -91,6 +104,32 @@ _NEGOTIATION_FOLLOWUP_PLANNER_MODULE = _load_module(
     "negotiation_followup_planner",
     NEGOTIATION_FOLLOWUP_PLANNER_PATH,
 )
+_EVAL_BENCHMARK_MODULES = {
+    "job_extraction_v1": _load_module(
+        "eval_benchmark_job_extraction_v1",
+        QUALITY_EVAL_BENCHMARK_DIR / "extraction_benchmark.py",
+    ),
+    "candidate_parse_v1": _load_module(
+        "eval_benchmark_candidate_parse_v1",
+        QUALITY_EVAL_BENCHMARK_DIR / "candidate_parse_benchmark.py",
+    ),
+    "interview_relevance_v1": _load_module(
+        "eval_benchmark_interview_relevance_v1",
+        QUALITY_EVAL_BENCHMARK_DIR / "interview_relevance_benchmark.py",
+    ),
+    "feedback_quality_v1": _load_module(
+        "eval_benchmark_feedback_quality_v1",
+        QUALITY_EVAL_BENCHMARK_DIR / "feedback_quality_benchmark.py",
+    ),
+    "trajectory_quality_v1": _load_module(
+        "eval_benchmark_trajectory_quality_v1",
+        QUALITY_EVAL_BENCHMARK_DIR / "trajectory_quality_benchmark.py",
+    ),
+    "negotiation_quality_v1": _load_module(
+        "eval_benchmark_negotiation_quality_v1",
+        QUALITY_EVAL_BENCHMARK_DIR / "negotiation_quality_benchmark.py",
+    ),
+}
 
 
 class JobIngestionAPI:
@@ -200,6 +239,43 @@ class JobIngestionAPI:
                     headers=[("Allow", "GET")],
                 )
             return self._handle_get_candidate(start_response, request_id=request_id, ingestion_id=ingestion_id)
+
+        if path == TAXONOMY_NORMALIZE_ROUTE:
+            if method != "POST":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "POST")],
+                )
+            return self._handle_normalize_taxonomy(environ, start_response, request_id=request_id)
+
+        if path == EVAL_RUN_ROUTE:
+            if method != "POST":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "POST")],
+                )
+            return self._handle_run_eval(environ, start_response, request_id=request_id)
+
+        if path.startswith(EVAL_ROUTE_PREFIX):
+            eval_run_id = unquote(path[len(EVAL_ROUTE_PREFIX) :])
+            if not eval_run_id or "/" in eval_run_id:
+                return _json_response(
+                    start_response,
+                    HTTPStatus.NOT_FOUND,
+                    _error_envelope(request_id=request_id, code="not_found", message="Resource not found", retryable=False),
+                )
+            if method != "GET":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "GET")],
+                )
+            return self._handle_get_eval_run(start_response, request_id=request_id, eval_run_id=eval_run_id)
 
         if path == COMPETENCY_FIT_ROUTE:
             if method != "POST":
@@ -830,6 +906,90 @@ class JobIngestionAPI:
             start_response,
             HTTPStatus.OK,
             _success_envelope(request_id=request_id, data=fit_payload),
+        )
+
+    def _handle_normalize_taxonomy(
+        self,
+        environ: dict[str, Any],
+        start_response: Any,
+        *,
+        request_id: str,
+    ) -> list[bytes]:
+        payload, payload_error = _parse_json_payload(environ)
+        if payload_error:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message=payload_error,
+                    retryable=False,
+                ),
+            )
+
+        validation_errors = _validate_taxonomy_normalize_payload(payload)
+        if validation_errors:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Request body validation failed",
+                    retryable=False,
+                    details=validation_errors,
+                ),
+            )
+
+        raw_terms = payload.get("terms")
+        assert isinstance(raw_terms, list)
+        mapped: list[dict[str, Any]] = []
+        unmapped: list[str] = []
+        seen_terms: set[str] = set()
+
+        for raw_term in raw_terms:
+            display_term = str(raw_term).strip()
+            normalized_input = _normalize_taxonomy_input_term(display_term)
+            if not normalized_input or normalized_input in seen_terms:
+                continue
+            seen_terms.add(normalized_input)
+
+            mapping = self._repository.get_taxonomy_mapping(
+                taxonomy_version=TAXONOMY_VERSION,
+                input_term=normalized_input,
+            )
+            if mapping is None:
+                normalized_term = self._taxonomy_normalizer.normalize_term(display_term)
+                mapping = self._repository.create_or_get_taxonomy_mapping(
+                    taxonomy_version=TAXONOMY_VERSION,
+                    input_term=normalized_input,
+                    canonical_term=str(getattr(normalized_term, "canonical_id", "")),
+                    confidence=float(getattr(normalized_term, "confidence", 0.0)),
+                )
+
+            if mapping.confidence > 0.0:
+                mapped.append(
+                    {
+                        "input": display_term,
+                        "canonical": mapping.canonical_term,
+                        "confidence": round(max(0.0, min(1.0, mapping.confidence)), 3),
+                    }
+                )
+            else:
+                unmapped.append(display_term)
+
+        return _json_response(
+            start_response,
+            HTTPStatus.OK,
+            _success_envelope(
+                request_id=request_id,
+                data={
+                    "taxonomy_version": TAXONOMY_VERSION,
+                    "mapped": mapped,
+                    "unmapped": unmapped,
+                },
+            ),
         )
 
     def _handle_get_candidate_profile(self, start_response: Any, *, request_id: str, candidate_id: str) -> list[bytes]:
@@ -1657,6 +1817,234 @@ class JobIngestionAPI:
             _success_envelope(request_id=request_id, data=payload),
         )
 
+    def _handle_run_eval(
+        self,
+        environ: dict[str, Any],
+        start_response: Any,
+        *,
+        request_id: str,
+    ) -> list[bytes]:
+        idempotency_key = str(environ.get("HTTP_IDEMPOTENCY_KEY", "")).strip()
+        if not idempotency_key:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Idempotency-Key header is required",
+                    retryable=False,
+                    details=[{"field": "Idempotency-Key", "reason": "required"}],
+                ),
+            )
+
+        payload, payload_error = _parse_json_payload(environ)
+        if payload_error:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message=payload_error,
+                    retryable=False,
+                ),
+            )
+
+        validation_errors = _validate_run_eval_request_payload(payload)
+        if validation_errors:
+            return _json_response(
+                start_response,
+                HTTPStatus.BAD_REQUEST,
+                _error_envelope(
+                    request_id=request_id,
+                    code="invalid_request",
+                    message="Request body validation failed",
+                    retryable=False,
+                    details=validation_errors,
+                ),
+            )
+
+        suite = str(payload["suite"])
+        create_result = self._repository.create_or_get_eval_run(
+            idempotency_key=idempotency_key,
+            request_payload=payload,
+            suite=suite,
+        )
+        if create_result.status == "idempotency_conflict":
+            return _json_response(
+                start_response,
+                HTTPStatus.CONFLICT,
+                _error_envelope(
+                    request_id=request_id,
+                    code="idempotency_key_conflict",
+                    message="Idempotency-Key is already associated with a different request",
+                    retryable=False,
+                ),
+            )
+
+        eval_run_payload = create_result.eval_run
+        if eval_run_payload is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                _error_envelope(
+                    request_id=request_id,
+                    code="internal_error",
+                    message="Eval run could not be persisted",
+                    retryable=True,
+                ),
+            )
+
+        eval_run_id = str(eval_run_payload.get("eval_run_id", "")).strip()
+        if not eval_run_id:
+            return _json_response(
+                start_response,
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                _error_envelope(
+                    request_id=request_id,
+                    code="internal_error",
+                    message="Persisted eval run is missing eval_run_id",
+                    retryable=True,
+                ),
+            )
+
+        if create_result.status == "created":
+            self._orchestrate_eval_run(eval_run_id=eval_run_id, suite=suite)
+
+        return _json_response(
+            start_response,
+            HTTPStatus.ACCEPTED,
+            _success_envelope(
+                request_id=request_id,
+                data={
+                    "eval_run_id": eval_run_id,
+                    "status": "queued",
+                },
+            ),
+        )
+
+    def _handle_get_eval_run(
+        self,
+        start_response: Any,
+        *,
+        request_id: str,
+        eval_run_id: str,
+    ) -> list[bytes]:
+        payload = self._repository.get_eval_run_by_id(eval_run_id)
+        if payload is None:
+            return _json_response(
+                start_response,
+                HTTPStatus.NOT_FOUND,
+                _error_envelope(
+                    request_id=request_id,
+                    code="not_found",
+                    message="Eval run not found",
+                    retryable=False,
+                ),
+            )
+
+        return _json_response(
+            start_response,
+            HTTPStatus.OK,
+            _success_envelope(request_id=request_id, data=payload),
+        )
+
+    def _orchestrate_eval_run(self, *, eval_run_id: str, suite: str) -> None:
+        run_payload = self._repository.mark_eval_run_running(eval_run_id=eval_run_id)
+        if run_payload is None:
+            return
+
+        if str(run_payload.get("status", "")) != "running":
+            return
+
+        terminal_status, metrics, error_payload = self._execute_eval_suite(suite=suite)
+        error_code = None
+        error_message = None
+        if error_payload is not None:
+            error_code = str(error_payload.get("code", "")).strip() or None
+            error_message = str(error_payload.get("message", "")).strip() or None
+
+        self._repository.complete_eval_run(
+            eval_run_id=eval_run_id,
+            status=terminal_status,
+            metrics=metrics,
+            error_code=error_code,
+            error_message=error_message,
+        )
+
+    def _execute_eval_suite(self, *, suite: str) -> tuple[str, dict[str, Any], dict[str, str] | None]:
+        benchmark_module = _EVAL_BENCHMARK_MODULES.get(suite)
+        base_metrics: dict[str, Any] = {
+            "suite": suite,
+            "passed": False,
+            "aggregate": {},
+            "failed_threshold_count": 0,
+            "failed_threshold_metrics": [],
+            "case_count": 0,
+        }
+        if benchmark_module is None:
+            return (
+                "failed",
+                base_metrics,
+                {
+                    "code": "unsupported_eval_suite",
+                    "message": f"Unsupported eval suite: {suite}",
+                },
+            )
+
+        benchmark_runner = getattr(benchmark_module, "run_benchmark", None)
+        if not callable(benchmark_runner):
+            return (
+                "failed",
+                base_metrics,
+                {
+                    "code": "benchmark_runner_unavailable",
+                    "message": f"Eval suite runner is unavailable for suite: {suite}",
+                },
+            )
+
+        try:
+            report, passed = benchmark_runner()
+            report_payload = report if isinstance(report, dict) else {}
+            aggregate_payload = report_payload.get("aggregate", {})
+            failed_thresholds = report_payload.get("failed_thresholds")
+            cases_payload = report_payload.get("cases")
+            failed_threshold_metrics = sorted(
+                [
+                    str(item.get("metric"))
+                    for item in (failed_thresholds if isinstance(failed_thresholds, list) else [])
+                    if isinstance(item, dict) and item.get("metric")
+                ]
+            )
+            metrics: dict[str, Any] = {
+                "suite": suite,
+                "passed": bool(passed),
+                "aggregate": aggregate_payload if isinstance(aggregate_payload, dict) else {},
+                "failed_threshold_count": len(failed_threshold_metrics),
+                "failed_threshold_metrics": failed_threshold_metrics,
+                "case_count": len(cases_payload) if isinstance(cases_payload, list) else 0,
+            }
+            if bool(passed):
+                return "succeeded", metrics, None
+            return (
+                "failed",
+                metrics,
+                {
+                    "code": "benchmark_threshold_failed",
+                    "message": f"Eval suite {suite} failed configured threshold gates",
+                },
+            )
+        except Exception as exc:  # pragma: no cover - defensive path
+            return (
+                "failed",
+                base_metrics,
+                {
+                    "code": "eval_execution_error",
+                    "message": str(exc),
+                },
+            )
+
     def _handle_append_interview_response(
         self,
         environ: dict[str, Any],
@@ -2063,7 +2451,7 @@ class JobIngestionAPI:
             "competency_weights": competency_weights,
             "evidence_spans": evidence_spans,
             "extraction_confidence": extraction_confidence,
-            "taxonomy_version": "m1-taxonomy-v1",
+            "taxonomy_version": TAXONOMY_VERSION,
             "version": 1,
         }
 
@@ -2639,6 +3027,20 @@ def _validate_create_competency_fit_payload(payload: dict[str, Any]) -> list[dic
     return errors
 
 
+def _validate_taxonomy_normalize_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+    terms = payload.get("terms")
+    if not isinstance(terms, list) or not terms:
+        errors.append({"field": "terms", "reason": "must be a non-empty array of strings"})
+        return errors
+
+    for idx, value in enumerate(terms):
+        if not isinstance(value, str) or not value.strip():
+            errors.append({"field": f"terms[{idx}]", "reason": "must be a non-empty string"})
+
+    return errors
+
+
 def _validate_create_interview_session_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
     errors: list[dict[str, str]] = []
 
@@ -2653,6 +3055,25 @@ def _validate_create_interview_session_payload(payload: dict[str, Any]) -> list[
     mode = payload.get("mode")
     if mode is not None and (not isinstance(mode, str) or mode not in INTERVIEW_MODE_VALUES):
         errors.append({"field": "mode", "reason": "must be one of: mock_interview, drill, negotiation"})
+
+    return errors
+
+
+def _validate_run_eval_request_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+
+    suite = payload.get("suite")
+    if not isinstance(suite, str) or suite not in EVAL_SUITE_VALUES:
+        errors.append(
+            {
+                "field": "suite",
+                "reason": (
+                    "must be one of: "
+                    "job_extraction_v1, candidate_parse_v1, interview_relevance_v1, "
+                    "feedback_quality_v1, trajectory_quality_v1, negotiation_quality_v1"
+                ),
+            }
+        )
 
     return errors
 
@@ -3877,6 +4298,16 @@ def _clean_line(value: str) -> str:
     line = value.strip()
     line = re.sub(r"^[-*]\s*", "", line)
     return line.strip()
+
+
+def _normalize_taxonomy_input_term(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    normalized = normalized.encode("ascii", "ignore").decode("ascii")
+    normalized = normalized.lower().strip()
+    normalized = normalized.replace("&", " and ")
+    normalized = re.sub(r"[^a-z0-9\s]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
 
 
 def _extract_skill_terms(lines: list[str], normalizer: Any) -> list[str]:

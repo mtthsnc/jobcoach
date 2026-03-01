@@ -249,6 +249,376 @@ class JobSpecPersistenceTest(unittest.TestCase):
         assert isinstance(candidate_id, str)
         return ingestion_id, candidate_id
 
+    def _seed_eval_run_state(
+        self,
+        *,
+        suite: str,
+        idempotency_key: str,
+        status: str,
+        metrics: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> str:
+        create_result = self.app._repository.create_or_get_eval_run(
+            idempotency_key=idempotency_key,
+            request_payload={"suite": suite},
+            suite=suite,
+        )
+        self.assertEqual(create_result.status, "created")
+        self.assertIsNotNone(create_result.eval_run)
+        assert create_result.eval_run is not None
+        eval_run_id = str(create_result.eval_run.get("eval_run_id", ""))
+        self.assertTrue(eval_run_id)
+
+        if status == "queued":
+            return eval_run_id
+
+        running_payload = self.app._repository.mark_eval_run_running(eval_run_id=eval_run_id)
+        self.assertIsNotNone(running_payload)
+        if status == "running":
+            return eval_run_id
+
+        self.app._repository.complete_eval_run(
+            eval_run_id=eval_run_id,
+            status=status,
+            metrics=metrics,
+            error_code=error_code,
+            error_message=error_message,
+        )
+        return eval_run_id
+
+    def test_taxonomy_normalize_endpoint_returns_deterministic_mapped_and_unmapped_terms(self) -> None:
+        status, _, body = _request(
+            self.app,
+            method="POST",
+            path="/v1/taxonomy/normalize",
+            body={"terms": ["Python", "GraphQL", "python 3", "SQL", "Python"]},
+        )
+
+        self.assertEqual(status, 200, body)
+        data = body.get("data", {})
+        self.assertEqual(data.get("taxonomy_version"), "m1-taxonomy-v1")
+
+        mapped = data.get("mapped")
+        self.assertIsInstance(mapped, list)
+        mapped_by_input = {str(item.get("input")): item for item in mapped if isinstance(item, dict)}
+        self.assertIn("Python", mapped_by_input)
+        self.assertIn("python 3", mapped_by_input)
+        self.assertIn("SQL", mapped_by_input)
+        self.assertEqual(mapped_by_input["Python"].get("canonical"), "skill.python")
+        self.assertEqual(mapped_by_input["python 3"].get("canonical"), "skill.python")
+        self.assertEqual(mapped_by_input["SQL"].get("canonical"), "skill.sql")
+
+        unmapped = data.get("unmapped")
+        self.assertEqual(unmapped, ["GraphQL"])
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            rows = conn.execute(
+                """
+                SELECT input_term, canonical_term, confidence
+                FROM taxonomy_mappings
+                WHERE taxonomy_version = ?
+                ORDER BY input_term ASC
+                """,
+                ("m1-taxonomy-v1",),
+            ).fetchall()
+        self.assertEqual(len(rows), 4)
+        row_map = {str(row[0]): (str(row[1]), float(row[2])) for row in rows}
+        self.assertEqual(row_map["python"][0], "skill.python")
+        self.assertEqual(row_map["python 3"][0], "skill.python")
+        self.assertEqual(row_map["sql"][0], "skill.sql")
+        self.assertEqual(row_map["graphql"][1], 0.0)
+
+        repeat_status, _, repeat_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/taxonomy/normalize",
+            body={"terms": ["PYTHON", "graphql"]},
+        )
+        self.assertEqual(repeat_status, 200, repeat_body)
+        repeat_data = repeat_body.get("data", {})
+        repeat_mapped = repeat_data.get("mapped")
+        self.assertIsInstance(repeat_mapped, list)
+        self.assertEqual(repeat_mapped[0].get("canonical"), "skill.python")
+        self.assertEqual(repeat_data.get("unmapped"), ["graphql"])
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            repeat_count = conn.execute(
+                "SELECT COUNT(*) FROM taxonomy_mappings WHERE taxonomy_version = ?",
+                ("m1-taxonomy-v1",),
+            ).fetchone()
+        self.assertIsNotNone(repeat_count)
+        assert repeat_count is not None
+        self.assertEqual(int(repeat_count[0]), 4)
+
+    def test_taxonomy_normalize_endpoint_validates_payload(self) -> None:
+        status, _, body = _request(
+            self.app,
+            method="POST",
+            path="/v1/taxonomy/normalize",
+            body={"terms": []},
+        )
+        self.assertEqual(status, 400, body)
+        self.assertEqual(body.get("error", {}).get("code"), "invalid_request")
+
+        status, _, body = _request(
+            self.app,
+            method="POST",
+            path="/v1/taxonomy/normalize",
+            body={"terms": ["python", "", 42]},
+        )
+        self.assertEqual(status, 400, body)
+        details = body.get("error", {}).get("details")
+        self.assertIsInstance(details, list)
+        assert isinstance(details, list)
+        detail_fields = {str(item.get("field")) for item in details if isinstance(item, dict)}
+        self.assertIn("terms[1]", detail_fields)
+        self.assertIn("terms[2]", detail_fields)
+
+    def test_run_eval_endpoint_queues_request_and_persists_terminal_metrics(self) -> None:
+        suite = "job_extraction_v1"
+        status, _, body = _request(
+            self.app,
+            method="POST",
+            path="/v1/evals/run",
+            body={"suite": suite},
+            headers={"Idempotency-Key": "eval-unit-create-001"},
+        )
+        self.assertEqual(status, 202, body)
+        self.assertIsNone(body.get("error"))
+        data = body.get("data", {})
+        eval_run_id = data.get("eval_run_id")
+        self.assertIsInstance(eval_run_id, str)
+        self.assertTrue(eval_run_id)
+        assert isinstance(eval_run_id, str)
+        self.assertEqual(data.get("status"), "queued")
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT suite, status, metrics_json, error_code, error_message, started_at, completed_at, request_json
+                FROM eval_runs
+                WHERE eval_run_id = ?
+                """,
+                (eval_run_id,),
+            ).fetchone()
+
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row[0], suite)
+        self.assertIn(row[1], {"succeeded", "failed"})
+        metrics_payload = json.loads(row[2]) if row[2] else {}
+        self.assertEqual(metrics_payload.get("suite"), suite)
+        self.assertIsInstance(metrics_payload.get("aggregate"), dict)
+        self.assertIsInstance(metrics_payload.get("case_count"), int)
+        self.assertIsNotNone(row[5])
+        self.assertIsNotNone(row[6])
+        if row[1] == "failed":
+            self.assertIsInstance(row[3], str)
+            self.assertTrue(str(row[3]))
+        else:
+            self.assertIsNone(row[3])
+            self.assertIsNone(row[4])
+        self.assertEqual(json.loads(row[7]), {"suite": suite})
+
+    def test_run_eval_endpoint_idempotency_replay_and_conflict(self) -> None:
+        first_status, _, first_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/evals/run",
+            body={"suite": "feedback_quality_v1"},
+            headers={"Idempotency-Key": "eval-unit-idempotency-001"},
+        )
+        self.assertEqual(first_status, 202, first_body)
+        first_run_id = first_body.get("data", {}).get("eval_run_id")
+        self.assertIsInstance(first_run_id, str)
+        self.assertTrue(first_run_id)
+        assert isinstance(first_run_id, str)
+
+        replay_status, _, replay_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/evals/run",
+            body={"suite": "feedback_quality_v1"},
+            headers={"Idempotency-Key": "eval-unit-idempotency-001"},
+        )
+        self.assertEqual(replay_status, 202, replay_body)
+        self.assertEqual(replay_body.get("data", {}).get("eval_run_id"), first_run_id)
+        self.assertEqual(replay_body.get("data", {}).get("status"), "queued")
+
+        conflict_status, _, conflict_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/evals/run",
+            body={"suite": "trajectory_quality_v1"},
+            headers={"Idempotency-Key": "eval-unit-idempotency-001"},
+        )
+        self.assertEqual(conflict_status, 409, conflict_body)
+        self.assertEqual(conflict_body.get("error", {}).get("code"), "idempotency_key_conflict")
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM eval_runs WHERE idempotency_key = ?",
+                ("eval-unit-idempotency-001",),
+            ).fetchone()
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(int(row[0]), 1)
+
+    def test_run_eval_endpoint_validates_header_and_suite_payload(self) -> None:
+        missing_header_status, _, missing_header_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/evals/run",
+            body={"suite": "feedback_quality_v1"},
+        )
+        self.assertEqual(missing_header_status, 400, missing_header_body)
+        self.assertEqual(missing_header_body.get("error", {}).get("code"), "invalid_request")
+
+        invalid_suite_status, _, invalid_suite_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/evals/run",
+            body={"suite": "unknown_suite"},
+            headers={"Idempotency-Key": "eval-unit-invalid-suite-001"},
+        )
+        self.assertEqual(invalid_suite_status, 400, invalid_suite_body)
+        self.assertEqual(invalid_suite_body.get("error", {}).get("code"), "invalid_request")
+        details = invalid_suite_body.get("error", {}).get("details")
+        self.assertIsInstance(details, list)
+        assert isinstance(details, list)
+        self.assertEqual(details[0].get("field"), "suite")
+
+    def test_get_eval_run_endpoint_returns_seeded_states(self) -> None:
+        queued_eval_run_id = self._seed_eval_run_state(
+            suite="job_extraction_v1",
+            idempotency_key="eval-get-queued-001",
+            status="queued",
+        )
+        running_eval_run_id = self._seed_eval_run_state(
+            suite="candidate_parse_v1",
+            idempotency_key="eval-get-running-001",
+            status="running",
+        )
+        succeeded_eval_run_id = self._seed_eval_run_state(
+            suite="interview_relevance_v1",
+            idempotency_key="eval-get-succeeded-001",
+            status="succeeded",
+            metrics={
+                "suite": "interview_relevance_v1",
+                "passed": True,
+                "aggregate": {"overall_relevance": 1.0},
+                "failed_threshold_count": 0,
+                "failed_threshold_metrics": [],
+                "case_count": 3,
+            },
+        )
+        failed_eval_run_id = self._seed_eval_run_state(
+            suite="trajectory_quality_v1",
+            idempotency_key="eval-get-failed-001",
+            status="failed",
+            metrics={
+                "suite": "trajectory_quality_v1",
+                "passed": False,
+                "aggregate": {"overall_trajectory_quality": 0.81},
+                "failed_threshold_count": 1,
+                "failed_threshold_metrics": ["overall_trajectory_quality"],
+                "case_count": 4,
+            },
+            error_code="benchmark_threshold_failed",
+            error_message="Threshold gate not satisfied",
+        )
+
+        queued_status, _, queued_body = _request(
+            self.app,
+            method="GET",
+            path=f"/v1/evals/{queued_eval_run_id}",
+        )
+        self.assertEqual(queued_status, 200, queued_body)
+        self.assertIsNone(queued_body.get("error"))
+        self.assertEqual(queued_body.get("data", {}).get("eval_run_id"), queued_eval_run_id)
+        self.assertEqual(queued_body.get("data", {}).get("suite"), "job_extraction_v1")
+        self.assertEqual(queued_body.get("data", {}).get("status"), "queued")
+        self.assertEqual(queued_body.get("data", {}).get("metrics"), {})
+        self.assertNotIn("error", queued_body.get("data", {}))
+        self.assertIsInstance(queued_body.get("data", {}).get("created_at"), str)
+        self.assertNotIn("started_at", queued_body.get("data", {}))
+        self.assertNotIn("completed_at", queued_body.get("data", {}))
+
+        running_status, _, running_body = _request(
+            self.app,
+            method="GET",
+            path=f"/v1/evals/{running_eval_run_id}",
+        )
+        self.assertEqual(running_status, 200, running_body)
+        self.assertIsNone(running_body.get("error"))
+        self.assertEqual(running_body.get("data", {}).get("status"), "running")
+        self.assertEqual(running_body.get("data", {}).get("metrics"), {})
+        self.assertIsInstance(running_body.get("data", {}).get("started_at"), str)
+        self.assertNotIn("completed_at", running_body.get("data", {}))
+
+        succeeded_status, _, succeeded_body = _request(
+            self.app,
+            method="GET",
+            path=f"/v1/evals/{succeeded_eval_run_id}",
+        )
+        self.assertEqual(succeeded_status, 200, succeeded_body)
+        self.assertIsNone(succeeded_body.get("error"))
+        self.assertEqual(succeeded_body.get("data", {}).get("status"), "succeeded")
+        self.assertTrue(succeeded_body.get("data", {}).get("metrics", {}).get("passed"))
+        self.assertIsInstance(succeeded_body.get("data", {}).get("completed_at"), str)
+        self.assertNotIn("error", succeeded_body.get("data", {}))
+
+        failed_status, _, failed_body = _request(
+            self.app,
+            method="GET",
+            path=f"/v1/evals/{failed_eval_run_id}",
+        )
+        self.assertEqual(failed_status, 200, failed_body)
+        self.assertIsNone(failed_body.get("error"))
+        self.assertEqual(failed_body.get("data", {}).get("status"), "failed")
+        self.assertFalse(failed_body.get("data", {}).get("metrics", {}).get("passed"))
+        self.assertEqual(
+            failed_body.get("data", {}).get("error"),
+            {"code": "benchmark_threshold_failed", "message": "Threshold gate not satisfied"},
+        )
+        self.assertIsInstance(failed_body.get("data", {}).get("completed_at"), str)
+
+    def test_get_eval_run_endpoint_returns_not_found_for_unknown_eval_run_id(self) -> None:
+        status, _, body = _request(
+            self.app,
+            method="GET",
+            path="/v1/evals/eval_missing_001",
+        )
+        self.assertEqual(status, 404, body)
+        self.assertEqual(body.get("error", {}).get("code"), "not_found")
+
+    def test_get_eval_run_endpoint_validates_method_and_path_shape(self) -> None:
+        method_status, method_headers, method_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/evals/eval_method_001",
+        )
+        self.assertEqual(method_status, 405, method_body)
+        self.assertEqual(method_body.get("error", {}).get("code"), "method_not_allowed")
+        self.assertEqual(method_headers.get("Allow"), "GET")
+
+        missing_id_status, _, missing_id_body = _request(
+            self.app,
+            method="GET",
+            path="/v1/evals/",
+        )
+        self.assertEqual(missing_id_status, 404, missing_id_body)
+        self.assertEqual(missing_id_body.get("error", {}).get("code"), "not_found")
+
+        slashy_id_status, _, slashy_id_body = _request(
+            self.app,
+            method="GET",
+            path="/v1/evals/run/extra",
+        )
+        self.assertEqual(slashy_id_status, 404, slashy_id_body)
+        self.assertEqual(slashy_id_body.get("error", {}).get("code"), "not_found")
+
     def test_job_spec_persisted_and_retrievable(self) -> None:
         _, job_spec_id = self._create_job_spec()
 

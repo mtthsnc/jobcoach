@@ -232,6 +232,7 @@ class JobIngestionApiContractTest(unittest.TestCase):
         table_names = {row[0] for row in rows}
         self.assertIn("job_ingestions", table_names)
         self.assertIn("candidate_ingestions", table_names)
+        self.assertIn("eval_runs", table_names)
         self.assertIn("interview_sessions", table_names)
         self.assertIn("feedback_reports", table_names)
         self.assertIn("negotiation_plans", table_names)
@@ -326,6 +327,302 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(second_status, 409, second_body)
         self.assertIsNone(second_body.get("data"))
         self.assertEqual(second_body.get("error", {}).get("code"), "idempotency_key_conflict")
+
+    def test_taxonomy_normalize_contract(self) -> None:
+        status, body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/taxonomy/normalize",
+            body={"terms": ["Python", "GraphQL", "SQL", "python 3", "Python"]},
+        )
+        self.assertEqual(status, 200, body)
+        self.assertIsNone(body.get("error"))
+        data = body.get("data", {})
+        self.assertEqual(data.get("taxonomy_version"), "m1-taxonomy-v1")
+        mapped = data.get("mapped")
+        self.assertIsInstance(mapped, list)
+        mapped_by_input = {str(item.get("input")): item for item in mapped if isinstance(item, dict)}
+        self.assertEqual(mapped_by_input.get("Python", {}).get("canonical"), "skill.python")
+        self.assertEqual(mapped_by_input.get("python 3", {}).get("canonical"), "skill.python")
+        self.assertEqual(mapped_by_input.get("SQL", {}).get("canonical"), "skill.sql")
+        self.assertEqual(data.get("unmapped"), ["GraphQL"])
+        self._assert_meta(body.get("meta", {}))
+        self._assert_taxonomy_mapping_rows_persisted(
+            expected={
+                "python": ("skill.python", 1.0),
+                "python 3": ("skill.python", 1.0),
+                "sql": ("skill.sql", 1.0),
+                "graphql": (None, 0.0),
+            }
+        )
+
+    def test_taxonomy_normalize_validation_contract(self) -> None:
+        status, body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/taxonomy/normalize",
+            body={"terms": []},
+        )
+        self.assertEqual(status, 400, body)
+        self.assertEqual(body.get("error", {}).get("code"), "invalid_request")
+        self.assertIsInstance(body.get("error", {}).get("details"), list)
+
+        status, body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/taxonomy/normalize",
+            body={"terms": ["python", "", 123]},
+        )
+        self.assertEqual(status, 400, body)
+        details = body.get("error", {}).get("details")
+        self.assertIsInstance(details, list)
+        assert isinstance(details, list)
+        detail_fields = {str(item.get("field")) for item in details if isinstance(item, dict)}
+        self.assertIn("terms[1]", detail_fields)
+        self.assertIn("terms[2]", detail_fields)
+
+    def test_run_eval_contract_persists_terminal_metrics(self) -> None:
+        suite = "job_extraction_v1"
+        idempotency_key = f"eval-run-create-{uuid.uuid4()}"
+        status, body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/evals/run",
+            body={"suite": suite},
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        self.assertEqual(status, 202, body)
+        self.assertIsNone(body.get("error"))
+
+        data = body.get("data", {})
+        self.assertEqual(data.get("status"), "queued")
+        eval_run_id = data.get("eval_run_id")
+        self.assertIsInstance(eval_run_id, str)
+        self.assertTrue(eval_run_id)
+        assert isinstance(eval_run_id, str)
+        self._assert_meta(body.get("meta", {}))
+
+        self._assert_eval_run_row_persisted(
+            eval_run_id=eval_run_id,
+            suite=suite,
+            idempotency_key=idempotency_key,
+            request_payload={"suite": suite},
+        )
+
+    def test_run_eval_idempotency_replay_and_conflict_contract(self) -> None:
+        idempotency_key = f"eval-run-idempotency-{uuid.uuid4()}"
+        first_status, first_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/evals/run",
+            body={"suite": "feedback_quality_v1"},
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        self.assertEqual(first_status, 202, first_body)
+        first_run_id = first_body.get("data", {}).get("eval_run_id")
+        self.assertIsInstance(first_run_id, str)
+        self.assertTrue(first_run_id)
+        assert isinstance(first_run_id, str)
+
+        replay_status, replay_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/evals/run",
+            body={"suite": "feedback_quality_v1"},
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        self.assertEqual(replay_status, 202, replay_body)
+        self.assertEqual(replay_body.get("data", {}).get("eval_run_id"), first_run_id)
+        self.assertEqual(replay_body.get("data", {}).get("status"), "queued")
+
+        conflict_status, conflict_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/evals/run",
+            body={"suite": "trajectory_quality_v1"},
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        self.assertEqual(conflict_status, 409, conflict_body)
+        self.assertEqual(conflict_body.get("error", {}).get("code"), "idempotency_key_conflict")
+
+    def test_run_eval_validation_contract(self) -> None:
+        missing_header_status, missing_header_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/evals/run",
+            body={"suite": "feedback_quality_v1"},
+        )
+        self.assertEqual(missing_header_status, 400, missing_header_body)
+        self.assertEqual(missing_header_body.get("error", {}).get("code"), "invalid_request")
+
+        invalid_suite_status, invalid_suite_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/evals/run",
+            body={"suite": "unknown_suite"},
+            headers={"Idempotency-Key": f"eval-run-invalid-suite-{uuid.uuid4()}"},
+        )
+        self.assertEqual(invalid_suite_status, 400, invalid_suite_body)
+        self.assertEqual(invalid_suite_body.get("error", {}).get("code"), "invalid_request")
+        detail_fields = {
+            str(item.get("field"))
+            for item in invalid_suite_body.get("error", {}).get("details", [])
+            if isinstance(item, dict)
+        }
+        self.assertIn("suite", detail_fields)
+
+    def test_get_eval_run_contract_for_seeded_lifecycle_states(self) -> None:
+        queued_eval_run_id = f"eval_contract_queued_{uuid.uuid4().hex}"
+        running_eval_run_id = f"eval_contract_running_{uuid.uuid4().hex}"
+        succeeded_eval_run_id = f"eval_contract_succeeded_{uuid.uuid4().hex}"
+        failed_eval_run_id = f"eval_contract_failed_{uuid.uuid4().hex}"
+
+        self._seed_eval_run_row(
+            eval_run_id=queued_eval_run_id,
+            suite="job_extraction_v1",
+            status="queued",
+            metrics={},
+        )
+        self._seed_eval_run_row(
+            eval_run_id=running_eval_run_id,
+            suite="candidate_parse_v1",
+            status="running",
+            metrics={},
+            started_at="2026-03-01 00:00:01",
+        )
+        self._seed_eval_run_row(
+            eval_run_id=succeeded_eval_run_id,
+            suite="interview_relevance_v1",
+            status="succeeded",
+            metrics={
+                "suite": "interview_relevance_v1",
+                "passed": True,
+                "aggregate": {"overall_relevance": 1.0},
+                "failed_threshold_count": 0,
+                "failed_threshold_metrics": [],
+                "case_count": 3,
+            },
+            started_at="2026-03-01 00:00:02",
+            completed_at="2026-03-01 00:00:03",
+        )
+        self._seed_eval_run_row(
+            eval_run_id=failed_eval_run_id,
+            suite="trajectory_quality_v1",
+            status="failed",
+            metrics={
+                "suite": "trajectory_quality_v1",
+                "passed": False,
+                "aggregate": {"overall_trajectory_quality": 0.81},
+                "failed_threshold_count": 1,
+                "failed_threshold_metrics": ["overall_trajectory_quality"],
+                "case_count": 4,
+            },
+            error_code="benchmark_threshold_failed",
+            error_message="Threshold gate not satisfied",
+            started_at="2026-03-01 00:00:04",
+            completed_at="2026-03-01 00:00:05",
+        )
+
+        queued_status, queued_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/evals/{queued_eval_run_id}",
+        )
+        self.assertEqual(queued_status, 200, queued_body)
+        self.assertIsNone(queued_body.get("error"))
+        queued_data = queued_body.get("data", {})
+        self.assertEqual(queued_data.get("eval_run_id"), queued_eval_run_id)
+        self.assertEqual(queued_data.get("suite"), "job_extraction_v1")
+        self.assertEqual(queued_data.get("status"), "queued")
+        self.assertEqual(queued_data.get("metrics"), {})
+        self.assertNotIn("error", queued_data)
+        self.assertIsInstance(queued_data.get("created_at"), str)
+        self.assertNotIn("started_at", queued_data)
+        self.assertNotIn("completed_at", queued_data)
+        self._assert_meta(queued_body.get("meta", {}))
+
+        running_status, running_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/evals/{running_eval_run_id}",
+        )
+        self.assertEqual(running_status, 200, running_body)
+        self.assertIsNone(running_body.get("error"))
+        running_data = running_body.get("data", {})
+        self.assertEqual(running_data.get("status"), "running")
+        self.assertEqual(running_data.get("metrics"), {})
+        self.assertIsInstance(running_data.get("started_at"), str)
+        self.assertNotIn("completed_at", running_data)
+        self._assert_meta(running_body.get("meta", {}))
+
+        succeeded_status, succeeded_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/evals/{succeeded_eval_run_id}",
+        )
+        self.assertEqual(succeeded_status, 200, succeeded_body)
+        self.assertIsNone(succeeded_body.get("error"))
+        succeeded_data = succeeded_body.get("data", {})
+        self.assertEqual(succeeded_data.get("status"), "succeeded")
+        self.assertEqual(succeeded_data.get("suite"), "interview_relevance_v1")
+        self.assertTrue(succeeded_data.get("metrics", {}).get("passed"))
+        self.assertIsInstance(succeeded_data.get("completed_at"), str)
+        self.assertNotIn("error", succeeded_data)
+        self._assert_meta(succeeded_body.get("meta", {}))
+
+        failed_status, failed_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/evals/{failed_eval_run_id}",
+        )
+        self.assertEqual(failed_status, 200, failed_body)
+        self.assertIsNone(failed_body.get("error"))
+        failed_data = failed_body.get("data", {})
+        self.assertEqual(failed_data.get("status"), "failed")
+        self.assertFalse(failed_data.get("metrics", {}).get("passed"))
+        self.assertEqual(
+            failed_data.get("error"),
+            {"code": "benchmark_threshold_failed", "message": "Threshold gate not satisfied"},
+        )
+        self.assertIsInstance(failed_data.get("completed_at"), str)
+        self._assert_meta(failed_body.get("meta", {}))
+
+    def test_get_eval_run_not_found_and_method_path_validation_contract(self) -> None:
+        missing_status, missing_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/evals/eval_missing_001",
+        )
+        self.assertEqual(missing_status, 404, missing_body)
+        self.assertEqual(missing_body.get("error", {}).get("code"), "not_found")
+        self._assert_meta(missing_body.get("meta", {}))
+
+        invalid_method_status, invalid_method_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/evals/eval_method_001",
+        )
+        self.assertEqual(invalid_method_status, 405, invalid_method_body)
+        self.assertEqual(invalid_method_body.get("error", {}).get("code"), "method_not_allowed")
+        self._assert_meta(invalid_method_body.get("meta", {}))
+
+        missing_id_status, missing_id_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/evals/",
+        )
+        self.assertEqual(missing_id_status, 404, missing_id_body)
+        self.assertEqual(missing_id_body.get("error", {}).get("code"), "not_found")
+        self._assert_meta(missing_id_body.get("meta", {}))
+
+        slashy_id_status, slashy_id_body = _request_json(
+            self.base_url,
+            "GET",
+            f"{API_PREFIX}/evals/run/extra",
+        )
+        self.assertEqual(slashy_id_status, 404, slashy_id_body)
+        self.assertEqual(slashy_id_body.get("error", {}).get("code"), "not_found")
+        self._assert_meta(slashy_id_body.get("meta", {}))
 
     def test_get_candidate_profile_and_storybank_contract(self) -> None:
         payload = {
@@ -2457,6 +2754,128 @@ class JobIngestionApiContractTest(unittest.TestCase):
                 self.assertIsInstance(metrics, list)
             self.assertGreaterEqual(float(row[7]), 0.0)
         self.assertLessEqual(float(row[7]), 1.0)
+
+    def _assert_taxonomy_mapping_rows_persisted(
+        self,
+        *,
+        expected: dict[str, tuple[str | None, float]],
+    ) -> None:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            rows = conn.execute(
+                """
+                SELECT input_term, canonical_term, confidence
+                FROM taxonomy_mappings
+                WHERE taxonomy_version = ?
+                ORDER BY input_term ASC
+                """,
+                ("m1-taxonomy-v1",),
+            ).fetchall()
+
+        row_map = {str(row[0]): (str(row[1]), float(row[2])) for row in rows}
+        for input_term, (canonical_term, confidence) in expected.items():
+            self.assertIn(input_term, row_map)
+            actual_canonical, actual_confidence = row_map[input_term]
+            if canonical_term is None:
+                self.assertTrue(actual_canonical.startswith("skill.freeform."))
+            else:
+                self.assertEqual(actual_canonical, canonical_term)
+            self.assertAlmostEqual(actual_confidence, confidence, places=6)
+
+    def _assert_eval_run_row_persisted(
+        self,
+        *,
+        eval_run_id: str,
+        suite: str,
+        idempotency_key: str,
+        request_payload: dict[str, str],
+    ) -> None:
+        deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
+        row = None
+        while time.monotonic() < deadline:
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                row = conn.execute(
+                    """
+                    SELECT
+                        eval_run_id,
+                        suite,
+                        status,
+                        idempotency_key,
+                        request_json,
+                        metrics_json,
+                        error_code,
+                        error_message,
+                        started_at,
+                        completed_at
+                    FROM eval_runs
+                    WHERE eval_run_id = ?
+                    """,
+                    (eval_run_id,),
+                ).fetchone()
+            if row is not None and row[2] in {"succeeded", "failed"}:
+                break
+            time.sleep(0.1)
+
+        self.assertIsNotNone(row, f"Eval run row missing for eval_run_id={eval_run_id}")
+        assert row is not None
+        self.assertEqual(row[0], eval_run_id)
+        self.assertEqual(row[1], suite)
+        self.assertIn(row[2], {"succeeded", "failed"})
+        self.assertEqual(row[3], idempotency_key)
+        self.assertEqual(json.loads(str(row[4])), request_payload)
+        metrics_payload = json.loads(str(row[5])) if row[5] is not None else {}
+        self.assertEqual(metrics_payload.get("suite"), suite)
+        self.assertIn("aggregate", metrics_payload)
+        self.assertIsInstance(metrics_payload.get("aggregate"), dict)
+        self.assertIsInstance(metrics_payload.get("case_count"), int)
+        if row[2] == "failed":
+            self.assertIsInstance(row[6], str)
+            self.assertTrue(row[6])
+        self.assertIsNotNone(row[8])
+        self.assertIsNotNone(row[9])
+
+    def _seed_eval_run_row(
+        self,
+        *,
+        eval_run_id: str,
+        suite: str,
+        status: str,
+        metrics: dict,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        started_at: str | None = None,
+        completed_at: str | None = None,
+    ) -> None:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute(
+                """
+                INSERT INTO eval_runs (
+                    eval_run_id,
+                    suite,
+                    status,
+                    metrics_json,
+                    error_code,
+                    error_message,
+                    idempotency_key,
+                    request_json,
+                    started_at,
+                    completed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    eval_run_id,
+                    suite,
+                    status,
+                    json.dumps(metrics, separators=(",", ":")),
+                    error_code,
+                    error_message,
+                    f"seed-{eval_run_id}",
+                    json.dumps({"suite": suite}, separators=(",", ":")),
+                    started_at,
+                    completed_at,
+                ),
+            )
+            conn.commit()
 
     def _assert_interview_session_row_persisted(self, *, session_id: str, job_spec_id: str, candidate_id: str) -> None:
         with closing(sqlite3.connect(self.db_path)) as conn:

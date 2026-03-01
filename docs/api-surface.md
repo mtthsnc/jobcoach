@@ -12,6 +12,7 @@ Runtime base path: `/v1`
 - `GET /candidate-ingestions/{ingestion_id}`
 - `GET /candidates/{candidate_id}/profile`
 - `GET /candidates/{candidate_id}/storybank`
+- `POST /taxonomy/normalize`
 - `POST /interview-sessions`
 - `GET /interview-sessions/{session_id}`
 - `POST /interview-sessions/{session_id}/responses`
@@ -19,10 +20,6 @@ Runtime base path: `/v1`
 - `GET /feedback-reports/{feedback_report_id}`
 - `POST /trajectory-plans`
 - `GET /trajectory-plans/{trajectory_plan_id}`
-
-## Contract-Defined, Not Fully Wired in Current Gateway Handlers
-
-- `POST /taxonomy/normalize`
 - `POST /evals/run`
 - `GET /evals/{eval_run_id}`
 

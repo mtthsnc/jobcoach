@@ -57,18 +57,29 @@ Status legend: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`
 | M6-003 | DONE | P0 | M6 | Implement negotiation strategy generator (anchor band, concession ladder, objection playbook) from context signals | M6-002 | Generated negotiation strategies are schema-valid, evidence-linked, and deterministic on fixed fixtures |
 | M6-004 | DONE | P1 | M6 | Implement post-interview follow-up planner (thank-you draft, recruiter cadence, outcome branches) | M6-003 | Follow-up plans include date-bounded actions, template-safe drafts, and deterministic branch selection |
 | M6-005 | DONE | P1 | M6 | Persist/retrieve negotiation plans with idempotent regeneration + optimistic version checks | M6-001,M6-003,M6-004 | Storage supports replay/conflict/version progression and returns schema-valid versioned negotiation plans |
-| M6-006 | TODO | P0 | M6 | Add negotiation/follow-up quality benchmark + threshold gates for CI/local | M6-005,M0-006 | Benchmark report emitted and CI fails on negotiation-strategy/follow-up-quality regressions |
+| M6-006 | DONE | P0 | M6 | Add negotiation/follow-up quality benchmark + threshold gates for CI/local | M6-005,M0-006 | Benchmark report emitted and CI fails on negotiation-strategy/follow-up-quality regressions |
+| M6-CLOSE-001 | DONE | P1 | M6 | Run final M6 stabilization sweep + release notes and close milestone | M6-006 | Full validation suite passes and M6 closeout notes are recorded with next-milestone handoff pointer |
+| M7-PLAN-001 | DONE | P0 | M7 | Define executable M7 backlog with dependencies and acceptance criteria | M6-CLOSE-001 | M7 task graph is committed and NEXT pointer targets first executable M7 task |
+| M7-001 | DONE | P0 | M7 | Implement `POST /taxonomy/normalize` API handler with deterministic normalization outputs and mapping persistence semantics | M7-PLAN-001 | Taxonomy normalize endpoint returns schema-valid deterministic term mappings and contract tests pass |
+| M7-002 | DONE | P0 | M7 | Expand eval-run orchestration contracts/storage to support benchmark suite catalog and idempotent run requests | M7-PLAN-001 | OpenAPI + migration + repository semantics support versioned suite catalog and idempotent eval-run creation |
+| M7-003 | DONE | P0 | M7 | Implement `POST /evals/run` orchestration flow (queued->running->terminal state transitions + metrics capture) | M7-002 | Eval run create returns `202 queued`, persists run state transitions, and deterministic executor unit tests pass |
+| M7-004 | DONE | P0 | M7 | Implement `GET /evals/{eval_run_id}` retrieval endpoint with schema-valid status/metrics/error payloads | M7-003 | Eval run GET contract tests cover queued/running/succeeded/failed and not-found behaviors |
+| M7-005 | TODO | P1 | M7 | Emit outbox lifecycle events for eval runs (queued/succeeded/failed) with retry-safe publication semantics | M7-003,M0-005 | Eval lifecycle events persist with deterministic payloads and retry/publish tests pass |
+| M7-006 | TODO | P0 | M7 | Add eval-orchestration quality benchmark + CI/local threshold gate | M7-004,M7-005,M0-006 | Benchmark report emitted in CI/local and fails on status-transition/idempotency/metrics regressions |
+| M7-CLOSE-001 | TODO | P1 | M7 | Run final M7 stabilization sweep + release notes and close milestone | M7-006 | Full validation suite passes and M7 closeout notes are recorded with next-milestone handoff pointer |
+| M8-PLAN-001 | TODO | P0 | M8 | Define executable M8 backlog with dependencies and acceptance criteria | M7-CLOSE-001 | M8 task graph is committed and NEXT pointer targets first executable M8 task |
 
 ## NEXT
 
-- `NEXT-1`: Execute `M6-006` (negotiation/follow-up quality benchmark gate).
-- `NEXT-2`: Run final M6 stabilization sweep after `M6-006` (full validation + release notes update).
+- `NEXT-1`: Execute `M7-005` (eval-run lifecycle outbox events).
+- `NEXT-2`: Execute `M7-006` (eval-orchestration quality benchmark + threshold gate).
 
 ## Backlog (Future Milestones)
 
 - M4: Scoring and feedback pipeline.
 - M5: Progress tracking and trajectory planner.
 - M6: Negotiation and post-interview assistant.
+- M7: Taxonomy normalization and evaluation-ops orchestration.
 
 ## Update Rules
 

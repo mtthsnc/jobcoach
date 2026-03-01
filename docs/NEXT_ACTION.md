@@ -2,30 +2,44 @@
 
 ## Active Milestone
 
-`M6` (Product Roadmap)
+`M7` (Execution)
 
 ## Active Task
 
-- Task ID: `M6-006`
-- Task: Add negotiation/follow-up quality benchmark + threshold gates for CI/local.
-- Why now: `M6-005` delivered versioned negotiation persistence semantics; quality gating now needs to lock negotiation strategy and follow-up output regressions.
+- Task ID: `M7-005`
+- Task: Emit outbox lifecycle events for eval runs (queued/succeeded/failed) with retry-safe publication semantics.
+- Why now: `M7-004` is complete, so the next critical-path dependency is publishing eval-run lifecycle events needed by downstream automation and observability consumers.
 
 ## Exact Next Steps
 
-1. Define negotiation/follow-up benchmark fixtures that cover high-leverage, high-risk, and low-signal histories with deterministic expected outputs.
-2. Implement benchmark runner metrics for strategy structure quality, follow-up cadence quality, branch/action boundedness, and evidence-link consistency.
-3. Add benchmark threshold gates to local/CI validation flow and emit report artifacts under `.tmp/`.
-4. Add/extend tests to assert benchmark report schema and threshold failure behavior.
-5. Run `make test` and `make contract-test` with benchmark gate enabled and record evidence in `docs/work-log.md`.
+1. Implement eval-run lifecycle outbox persistence in the API gateway/repository flow:
+   - enqueue `eval_run.queued` when `POST /v1/evals/run` creates a new run,
+   - enqueue `eval_run.succeeded` and `eval_run.failed` on terminal transitions,
+   - avoid duplicate outbox event emission on idempotent replay.
+2. Define deterministic event payload contract for each lifecycle event:
+   - include `eval_run_id`, `suite`, `status`, and stable timestamp fields,
+   - include metrics/error payload for terminal events,
+   - ensure retry-safe idempotency semantics at persistence boundary.
+3. Add/extend unit + contract tests for lifecycle outbox events:
+   - created-run enqueue behavior,
+   - terminal transition enqueue behavior (succeeded and failed),
+   - replay/conflict semantics do not duplicate lifecycle events.
+4. Run validation sequence:
+   - `make test`
+   - `make validate-openapi`
+   - `make migrate-up`
+   - `make migrate-down`
+   - `JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test`
 
 ## Validation Required
 
-- Confirm planning artifacts are coherent and actionable:
-  - Benchmark report includes deterministic quality metrics for negotiation strategy and follow-up outputs.
-  - Threshold gates fail on fixture regressions and pass on baseline fixtures.
-  - CI/local flows invoke the benchmark gate consistently.
-  - `docs/work-log.md` records M6-006 execution evidence.
+- Confirm M7-005 implementation artifacts are complete and actionable:
+  - `POST /v1/evals/run` and terminal transitions emit deterministic eval-run outbox lifecycle events.
+  - Event persistence is retry-safe and idempotency replay does not duplicate lifecycle events.
+  - Lifecycle event payloads remain schema-consistent and deterministic for fixed inputs.
+  - Full validation suite passes in this environment (with documented contract-test port override/elevated run as needed).
+  - `docs/work-log.md` records execution evidence and `docs/NEXT_ACTION.md` advances to `M7-006`.
 
 ## Return Pointer
 
-After `M6-006` is complete, close M6 milestone and prepare next milestone planning pointer.
+After `M7-005` is complete, execute `M7-006`.

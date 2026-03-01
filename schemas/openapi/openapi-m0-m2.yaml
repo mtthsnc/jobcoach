@@ -1534,7 +1534,13 @@ components:
       properties:
         suite:
           type: string
-          enum: [job_extraction_v1, candidate_parse_v1]
+          enum:
+            - job_extraction_v1
+            - candidate_parse_v1
+            - interview_relevance_v1
+            - feedback_quality_v1
+            - trajectory_quality_v1
+            - negotiation_quality_v1
 
     EvalAcceptedResponse:
       type: object
@@ -1554,11 +1560,27 @@ components:
           type: object
           properties:
             eval_run_id: { type: string }
-            suite: { type: string }
+            suite:
+              type: string
+              enum:
+                - job_extraction_v1
+                - candidate_parse_v1
+                - interview_relevance_v1
+                - feedback_quality_v1
+                - trajectory_quality_v1
+                - negotiation_quality_v1
             status: { type: string, enum: [queued, running, succeeded, failed] }
             metrics:
               type: object
               additionalProperties: true
+            error:
+              type: object
+              properties:
+                code: { type: string }
+                message: { type: string }
+            created_at: { type: string, format: date-time }
+            started_at: { type: string, format: date-time }
+            completed_at: { type: string, format: date-time }
         meta: { $ref: '#/components/schemas/Meta' }
         error: { type: 'null' }
 

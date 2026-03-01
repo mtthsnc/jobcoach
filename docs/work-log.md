@@ -1845,3 +1845,314 @@ Use UTC timestamps. Append entries only.
   - Contract test execution on default port `8000` is environment-sensitive in this workspace; isolated `JOBCOACH_API_BASE_URL` was used for deterministic local validation.
 - Next pointer:
   - Execute `M6-006` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T14:20:41Z
+- Execute `M6-006` negotiation/follow-up quality benchmark gate.
+- Task IDs: M6-006
+- Changes made:
+  - Started implementation of deterministic negotiation/follow-up benchmark runner, fixture corpus, and CI/local threshold wiring.
+- Validation evidence:
+  - Planned: benchmark runner/unit validation + `make test` + `make contract-test` with benchmark gate enabled.
+- Blockers / risks:
+  - Contract tests require local port binding permission in this environment.
+- Next pointer:
+  - Complete `M6-006`, then advance to M6 closeout + M7 planning pointer.
+
+- END
+- 2026-03-01T14:32:09Z
+- Execute `M6-006` negotiation/follow-up quality benchmark gate.
+- Task IDs: M6-006
+- Changes made:
+  - Added deterministic benchmark runner `services/quality-eval/benchmark/negotiation_quality_benchmark.py` with threshold-gated metrics for:
+    - strategy structure quality,
+    - follow-up cadence quality,
+    - branch/action boundedness,
+    - evidence-link consistency,
+    - `NegotiationPlan` schema validity.
+  - Added fixture corpus `tests/unit/fixtures/negotiation_quality/benchmark_*.json` covering:
+    - high-leverage history,
+    - high-risk deadline pressure,
+    - low-signal sparse history.
+  - Added benchmark runner unit tests `tests/unit/test_negotiation_quality_benchmark_runner.py` for baseline pass, strict-threshold failure behavior, and report schema coverage.
+  - Wired local/CI gates:
+    - `Makefile`: new `benchmark-negotiation-quality` target, new benchmark variables/report path, and integration into `make test`.
+    - `.github/workflows/ci-placeholder.yml`: added negotiation benchmark artifact output (`.tmp/negotiation-quality-benchmark-report.json`).
+  - Updated planning artifacts:
+    - `docs/tasklist.md`: marked `M6-006` as `DONE`; added `M6-CLOSE-001` and `M7-PLAN-001` queue pointers.
+    - `docs/NEXT_ACTION.md`: moved active pointer to `M6-CLOSE-001`.
+    - `docs/decision-log.md`: added `DEC-016` documenting negotiation/follow-up benchmark gate decision.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 services/quality-eval/benchmark/negotiation_quality_benchmark.py --fixtures-dir tests/unit/fixtures/negotiation_quality --report-path .tmp/negotiation-quality-benchmark-report.json`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_negotiation_quality_benchmark_runner.py`
+  - `PYTHONDONTWRITEBYTECODE=1 make test`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL='http://127.0.0.1:8011' JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' make contract-test` (passed after requesting elevated run because sandbox denied local socket bind)
+- Blockers / risks:
+  - Contract-test execution remains environment-sensitive to local socket bind permissions; port override + elevated execution were required in this sandbox.
+- Next pointer:
+  - Execute `M6-CLOSE-001` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T14:32:30Z
+- Execute `M6-CLOSE-001` milestone closeout sweep and handoff.
+- Task IDs: M6-CLOSE-001
+- Changes made:
+  - Started final M6 stabilization sweep, release-note publication, and M7 handoff update.
+- Validation evidence:
+  - Planned: `make test`, `make validate-openapi`, `make migrate-up`, `make migrate-down`, `JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test`.
+- Blockers / risks:
+  - Contract tests may require elevated execution in this sandbox due local socket bind restrictions.
+- Next pointer:
+  - Complete closeout artifacts and move pointer to `M7-PLAN-001`.
+
+- END
+- 2026-03-01T14:36:22Z
+- Execute `M6-CLOSE-001` milestone closeout sweep and handoff.
+- Task IDs: M6-CLOSE-001
+- Changes made:
+  - Added M6 release-note summary: `docs/m6-release-notes.md` (scope delivered, quality gates, and environment caveats).
+  - Updated docs index with release-note reference in `docs/README.md`.
+  - Marked `M6-CLOSE-001` as `DONE` in `docs/tasklist.md` and advanced NEXT queue to `M7-PLAN-001`.
+  - Updated `docs/NEXT_ACTION.md` active pointer to `M7-PLAN-001` with planning-specific next steps and acceptance checks.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 make test` (pass)
+  - `make validate-openapi` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m6-close-migrate-up.sqlite3 make migrate-up` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m6-close-migrate-down.sqlite3 make migrate-down` (pass)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test` (initial sandbox bind failure; pass on elevated rerun)
+- Blockers / risks:
+  - In this environment, contract tests require elevated execution to bind local API socket.
+- Next pointer:
+  - Execute `M7-PLAN-001` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T14:36:40Z
+- Execute `M7-PLAN-001` and define executable M7 task graph.
+- Task IDs: M7-PLAN-001
+- Changes made:
+  - Started M7 planning pass focused on unwired taxonomy/eval contract surfaces and deterministic execution ordering.
+- Validation evidence:
+  - Planned: planning-doc consistency checks across `docs/tasklist.md`, `docs/NEXT_ACTION.md`, `docs/decision-log.md`, `docs/masterplan.md`, and `docs/implementation-plan.md`.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Commit M7 task graph and move active pointer to `M7-001`.
+
+- END
+- 2026-03-01T14:39:27Z
+- Execute `M7-PLAN-001` and define executable M7 task graph.
+- Task IDs: M7-PLAN-001
+- Changes made:
+  - Marked `M7-PLAN-001` as `DONE` and added executable M7 task graph (`M7-001`..`M7-006`) plus `M7-CLOSE-001`/`M8-PLAN-001` continuity tasks in `docs/tasklist.md`.
+  - Updated `docs/tasklist.md` NEXT queue to `M7-001` then `M7-002`.
+  - Updated `docs/NEXT_ACTION.md` active pointer to `M7-001` with concrete implementation and validation steps.
+  - Added decision `DEC-017` in `docs/decision-log.md` documenting M7 decomposition rationale and scope boundaries.
+  - Updated milestone-planning references in `docs/masterplan.md` and `docs/implementation-plan.md` to include M7.
+- Validation evidence:
+  - Planning artifacts are pointer-consistent and acceptance-aligned across:
+    - `docs/tasklist.md`
+    - `docs/NEXT_ACTION.md`
+    - `docs/decision-log.md`
+    - `docs/masterplan.md`
+    - `docs/implementation-plan.md`
+- Blockers / risks:
+  - No blockers encountered.
+- Next pointer:
+  - Execute `M7-001` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T14:40:00Z
+- Execute `M7-001` taxonomy normalize endpoint wiring and contract coverage.
+- Task IDs: M7-001
+- Changes made:
+  - Started implementation for `POST /taxonomy/normalize` with deterministic normalization + persistence semantics.
+- Validation evidence:
+  - Planned: targeted unit/contract tests plus full `make test`, `make validate-openapi`, migration up/down, and `make contract-test`.
+- Blockers / risks:
+  - Contract tests require elevated execution in this sandbox due local socket bind restrictions.
+- Next pointer:
+  - Complete endpoint wiring/tests and advance pointer to `M7-002`.
+
+- END
+- 2026-03-01T14:47:53Z
+- Execute `M7-001` taxonomy normalize endpoint wiring and contract coverage.
+- Task IDs: M7-001
+- Changes made:
+  - Implemented `POST /v1/taxonomy/normalize` handler in `apps/api-gateway/api_gateway/app.py` with payload validation and deterministic mapped/unmapped response shape.
+  - Added taxonomy mapping persistence semantics in `apps/api-gateway/api_gateway/repository.py` (`get_taxonomy_mapping`, `create_or_get_taxonomy_mapping`) backed by `taxonomy_mappings`.
+  - Added unit tests in `tests/unit/test_job_spec_persistence.py` for normalize endpoint behavior and validation failures.
+  - Added contract tests in `tests/contracts/test_job_ingestions_api_contract.py` for normalize endpoint happy-path + validation semantics and DB persistence assertions.
+  - Updated docs pointers and architecture records:
+    - `docs/tasklist.md`: marked `M7-001` as `DONE`, advanced NEXT queue.
+    - `docs/NEXT_ACTION.md`: advanced active pointer to `M7-002`.
+    - `docs/api-surface.md`: moved `POST /taxonomy/normalize` to implemented endpoint inventory.
+    - `docs/decision-log.md`: added `DEC-018` for taxonomy mapping persistence strategy.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_taxonomy_normalize_endpoint_returns_deterministic_mapped_and_unmapped_terms tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_taxonomy_normalize_endpoint_validates_payload`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_taxonomy_normalize_contract tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_taxonomy_normalize_validation_contract` (pass with elevated execution)
+  - `PYTHONDONTWRITEBYTECODE=1 make test` (pass)
+  - `make validate-openapi` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m7-001-migrate-up.sqlite3 make migrate-up` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m7-001-migrate-down.sqlite3 make migrate-down` (pass)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test` (initial sandbox bind failure; pass on elevated rerun)
+- Blockers / risks:
+  - In this environment, contract tests still require elevated execution to bind local API socket.
+- Next pointer:
+  - Execute `M7-002` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T14:48:10Z
+- Execute `M7-002` eval-run orchestration contract/storage expansion.
+- Task IDs: M7-002
+- Changes made:
+  - Started implementation for eval suite catalog expansion, SQLite storage migration updates, and repository idempotent create/get primitives for eval runs.
+- Validation evidence:
+  - Planned: targeted eval-run unit tests plus full `make test`, `make validate-openapi`, migrate up/down, and `make contract-test` with `JOBCOACH_API_BASE_URL=http://127.0.0.1:8011`.
+- Blockers / risks:
+  - Contract tests expected to require elevated execution in this sandbox due local socket bind restrictions.
+- Next pointer:
+  - Complete M7-002 and advance pointer to `M7-003`.
+
+- END
+- 2026-03-01T15:05:03Z
+- Execute `M7-002` eval-run orchestration contract/storage expansion.
+- Task IDs: M7-002
+- Changes made:
+  - Expanded eval suite catalog in OpenAPI (`RunEvalRequest.suite`, `EvalRunResponse.data.suite`) to include benchmark gates executed by `make test`: extraction/candidate/interview/feedback/trajectory/negotiation.
+  - Added migration `infra/migrations/012_m7_eval_run_catalog_and_idempotency.sql`:
+    - rebuilt `eval_runs` with expanded suite `CHECK` constraint,
+    - added `idempotency_key` + `request_json` storage semantics,
+    - added unique idempotency index (`idx_eval_runs_idempotency_key`) and preserved status/suite indexes.
+  - Added eval-run repository primitives in `apps/api-gateway/api_gateway/repository.py`:
+    - `create_or_get_eval_run(...)` with deterministic `created`/`idempotent_replay`/`idempotency_conflict` semantics,
+    - `get_eval_run_by_id(...)` deterministic retrieval helper,
+    - `_row_to_eval_run(...)` row-to-payload normalization.
+  - Added expanded-suite validation helper groundwork in `apps/api-gateway/api_gateway/app.py`:
+    - `EVAL_SUITE_VALUES`,
+    - `_validate_run_eval_request_payload(...)`.
+  - Added focused unit coverage `tests/unit/test_eval_run_repository.py`:
+    - migration compatibility for expanded suite values,
+    - repository create/replay/conflict semantics,
+    - deterministic retrieval behavior,
+    - expanded suite validation helper coverage.
+  - Updated planning artifacts:
+    - `docs/tasklist.md`: marked `M7-002` as `DONE` and advanced NEXT queue to `M7-003` then `M7-004`.
+    - `docs/NEXT_ACTION.md`: advanced active pointer to `M7-003` with concrete execution steps.
+    - `docs/decision-log.md`: added `DEC-019` for eval suite catalog + idempotent storage decision.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_eval_run_repository.py`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `PYTHONDONTWRITEBYTECODE=1 make test` (pass)
+  - `make validate-openapi` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m7-002-migrate-up.sqlite3 make migrate-up` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m7-002-migrate-down.sqlite3 make migrate-down` (pass)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test` (initial sandbox bind failure; pass on elevated rerun)
+- Blockers / risks:
+  - In this environment, contract tests require elevated execution to bind local API socket.
+- Next pointer:
+  - Execute `M7-003` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T15:06:10Z
+- Execute `M7-003` eval-run POST orchestration flow.
+- Task IDs: M7-003
+- Changes made:
+  - Started implementation for `POST /v1/evals/run` with idempotent create semantics, deterministic run execution, and persisted terminal transitions.
+- Validation evidence:
+  - Planned: targeted unit tests for repository + endpoint semantics, then full `make test`, `make validate-openapi`, migrate up/down, and contract tests with `JOBCOACH_API_BASE_URL=http://127.0.0.1:8011`.
+- Blockers / risks:
+  - Contract tests expected to require elevated execution in this sandbox due local API bind restrictions.
+- Next pointer:
+  - Complete M7-003 implementation/tests and advance pointer to `M7-004`.
+
+- END
+- 2026-03-01T15:22:26Z
+- Execute `M7-003` eval-run POST orchestration flow.
+- Task IDs: M7-003
+- Changes made:
+  - Implemented `POST /v1/evals/run` in `apps/api-gateway/api_gateway/app.py`:
+    - `Idempotency-Key` enforcement + request payload validation (`suite` catalog),
+    - deterministic create/replay/conflict handling over repository primitives,
+    - queued `202` response contract (`eval_run_id`, `status=queued`),
+    - synchronous deterministic executor wiring (`queued -> running -> succeeded|failed`) with metrics/error persistence.
+  - Added deterministic eval benchmark module wiring in API gateway for all six suite IDs:
+    - `job_extraction_v1`, `candidate_parse_v1`, `interview_relevance_v1`,
+    - `feedback_quality_v1`, `trajectory_quality_v1`, `negotiation_quality_v1`.
+  - Added repository transition primitives in `apps/api-gateway/api_gateway/repository.py`:
+    - `mark_eval_run_running(...)`,
+    - `complete_eval_run(...)`.
+  - Added/extended unit coverage:
+    - `tests/unit/test_eval_run_repository.py`: running/terminal transition persistence semantics.
+    - `tests/unit/test_job_spec_persistence.py`: eval-run endpoint happy path, idempotency replay/conflict, and validation behavior.
+  - Added/extended contract coverage:
+    - `tests/contracts/test_job_ingestions_api_contract.py`:
+      - eval-run create contract + DB terminal-state assertions,
+      - idempotency replay/conflict contract,
+      - validation contract.
+  - Updated API surface and planning artifacts:
+    - `docs/api-surface.md`: moved `POST /evals/run` into implemented endpoints.
+    - `docs/tasklist.md`: marked `M7-003` `DONE`; advanced NEXT queue to `M7-004` then `M7-005`.
+    - `docs/NEXT_ACTION.md`: advanced active pointer to `M7-004`.
+    - `docs/decision-log.md`: added `DEC-020` documenting synchronous deterministic eval-run execution + queued response contract decision.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_eval_run_repository.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_job_spec_persistence.py`
+  - `make test` (pass)
+  - `make validate-openapi` (pass)
+  - `make migrate-up` (pass)
+  - `make migrate-down` (initial parallel collision when run alongside migrate-up; pass on sequential rerun)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test` (initial sandbox bind failure; pass on elevated rerun)
+- Blockers / risks:
+  - In this environment, contract tests require elevated execution to bind the local API process port.
+- Next pointer:
+  - Execute `M7-004` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T15:40:15Z
+- Execute `M7-004` eval-run GET retrieval endpoint.
+- Task IDs: M7-004
+- Changes made:
+  - Started implementation for `GET /v1/evals/{eval_run_id}` route wiring, repository-backed retrieval handler, and deterministic state retrieval tests.
+- Validation evidence:
+  - Planned: targeted unit + contract retrieval tests, then full `make test`, `make validate-openapi`, migrate up/down, and `make contract-test`.
+- Blockers / risks:
+  - Contract tests expected to require elevated execution in this sandbox due local API bind restrictions.
+- Next pointer:
+  - Complete M7-004 implementation/tests and advance pointer to `M7-005`.
+
+- END
+- 2026-03-01T15:46:29Z
+- Execute `M7-004` eval-run GET retrieval endpoint.
+- Task IDs: M7-004
+- Changes made:
+  - Implemented `GET /v1/evals/{eval_run_id}` route wiring and handler in `apps/api-gateway/api_gateway/app.py`:
+    - path parsing/validation for eval-run ids,
+    - method guard (`GET` only) with `405 method_not_allowed`,
+    - `404 not_found` behavior for unknown eval-run IDs,
+    - `200` success payload backed by persisted eval-run state from `get_eval_run_by_id`.
+  - Added deterministic unit coverage in `tests/unit/test_job_spec_persistence.py`:
+    - seeded retrieval behavior for `queued`, `running`, `succeeded`, and `failed`,
+    - unknown eval-run `404` semantics,
+    - method/path validation behavior.
+  - Added deterministic contract coverage in `tests/contracts/test_job_ingestions_api_contract.py`:
+    - seeded eval-run retrieval flow for all lifecycle states,
+    - stable not-found behavior,
+    - method/path validation behavior.
+  - Updated OpenAPI eval-run retrieval response shape in `schemas/openapi/openapi-m0-m2.yaml` (`EvalRunResponse`) to include optional lifecycle `error` and timestamp fields (`created_at`, `started_at`, `completed_at`).
+  - Updated planning/docs:
+    - `docs/tasklist.md`: marked `M7-004` as `DONE`, advanced NEXT queue to `M7-005` then `M7-006`.
+    - `docs/NEXT_ACTION.md`: advanced active pointer to `M7-005`.
+    - `docs/api-surface.md`: moved `GET /evals/{eval_run_id}` into implemented endpoint inventory.
+    - `docs/decision-log.md`: added `DEC-021` for eval-run retrieval payload and read-path semantics.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_get_eval_run_endpoint_returns_seeded_states tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_get_eval_run_endpoint_returns_not_found_for_unknown_eval_run_id tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_get_eval_run_endpoint_validates_method_and_path_shape`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_get_eval_run_contract_for_seeded_lifecycle_states tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_get_eval_run_not_found_and_method_path_validation_contract` (initial sandbox bind failure; pass on elevated rerun)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 make test` (pass)
+  - `make validate-openapi` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m7-004-migrate-up.sqlite3 make migrate-up` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m7-004-migrate-down.sqlite3 make migrate-down` (pass)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test` (initial sandbox bind failure; pass on elevated rerun)
+- Blockers / risks:
+  - In this environment, contract tests require elevated execution to bind the local API process port.
+- Next pointer:
+  - Execute `M7-005` from `docs/NEXT_ACTION.md`.
