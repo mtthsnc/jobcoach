@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -70,7 +72,7 @@ class TaxonomyNormalizer:
 
         return NormalizedTerm(
             input_term=cleaned,
-            canonical_id="unknown",
+            canonical_id=_freeform_skill_id(token),
             canonical_label=cleaned,
             matched_alias=None,
             confidence=0.0,
@@ -96,8 +98,21 @@ def normalize_job_requirement_terms(
 
 
 def _normalize_token(value: str) -> str:
-    normalized = value.lower().strip()
+    normalized = unicodedata.normalize("NFKD", value)
+    normalized = normalized.encode("ascii", "ignore").decode("ascii")
+    normalized = normalized.lower().strip()
     normalized = normalized.replace("&", " and ")
     normalized = re.sub(r"[^a-z0-9\s]+", " ", normalized)
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized.strip()
+
+
+def _freeform_skill_id(token: str) -> str:
+    safe = token or "unknown"
+    slug = safe.replace(" ", "_")
+    slug = re.sub(r"[^a-z0-9_]+", "_", slug)
+    slug = re.sub(r"_+", "_", slug).strip("_")
+    if not slug:
+        slug = "unknown"
+    digest = hashlib.sha1(safe.encode("utf-8")).hexdigest()[:8]
+    return f"skill.freeform.{slug[:32]}_{digest}"

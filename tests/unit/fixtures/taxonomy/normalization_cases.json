@@ -16,7 +16,7 @@
   },
   {
     "input": "stakeholder communication",
-    "expected_id": "unknown",
+    "expected_id": "skill.freeform.stakeholder_communication_a784cfaf",
     "known": false
   }
 ]

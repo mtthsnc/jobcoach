@@ -50,7 +50,10 @@ class TaxonomyNormalizerTest(unittest.TestCase):
             normalizer=self.normalizer,
         )
 
-        self.assertEqual([t.canonical_id for t in normalized["required"]], ["skill.python", "skill.sql", "unknown"])
+        self.assertEqual(
+            [t.canonical_id for t in normalized["required"]],
+            ["skill.python", "skill.sql", "skill.freeform.nonexistent_skill_7b963d11"],
+        )
         self.assertEqual([t.canonical_id for t in normalized["preferred"]], ["skill.event_driven_architecture"])
 
 
