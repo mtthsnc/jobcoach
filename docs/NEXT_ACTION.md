@@ -6,26 +6,26 @@
 
 ## Active Task
 
-- Task ID: `M6-005`
-- Task: Persist/retrieve negotiation plans with idempotent regeneration + optimistic version checks.
-- Why now: `M6-004` completed deterministic strategy and follow-up generation blocks; persistence semantics now need version progression and conflict-safe regeneration.
+- Task ID: `M6-006`
+- Task: Add negotiation/follow-up quality benchmark + threshold gates for CI/local.
+- Why now: `M6-005` delivered versioned negotiation persistence semantics; quality gating now needs to lock negotiation strategy and follow-up output regressions.
 
 ## Exact Next Steps
 
-1. Extend negotiation plan create semantics with `expected_version` and `regenerate` request controls for optimistic conflict detection and explicit regeneration.
-2. Add repository versioning workflow for `NegotiationPlan` by `(candidate_id, target_role)` with idempotent replay/conflict behavior and supersede linkage.
-3. Update negotiation contracts/schemas to include version metadata and supersession fields required for retrieval and replay stability.
-4. Add unit/contract coverage for first-create, replay, regenerate progression, and stale expected-version conflicts while preserving schema validity.
-5. Run `make validate-openapi`, `make migrate-up`, `make migrate-down`, `make test`, and `make contract-test`.
+1. Define negotiation/follow-up benchmark fixtures that cover high-leverage, high-risk, and low-signal histories with deterministic expected outputs.
+2. Implement benchmark runner metrics for strategy structure quality, follow-up cadence quality, branch/action boundedness, and evidence-link consistency.
+3. Add benchmark threshold gates to local/CI validation flow and emit report artifacts under `.tmp/`.
+4. Add/extend tests to assert benchmark report schema and threshold failure behavior.
+5. Run `make test` and `make contract-test` with benchmark gate enabled and record evidence in `docs/work-log.md`.
 
 ## Validation Required
 
 - Confirm planning artifacts are coherent and actionable:
-  - Versioned negotiation plans persist/retrieve correctly with deterministic payload blocks unchanged on replay.
-  - Regeneration increments version and sets supersedes linkage while preserving schema validity.
-  - Unit/contract suites assert idempotent replay, expected-version conflicts, and retrieval semantics.
-  - `docs/work-log.md` records M6-005 execution evidence.
+  - Benchmark report includes deterministic quality metrics for negotiation strategy and follow-up outputs.
+  - Threshold gates fail on fixture regressions and pass on baseline fixtures.
+  - CI/local flows invoke the benchmark gate consistently.
+  - `docs/work-log.md` records M6-006 execution evidence.
 
 ## Return Pointer
 
-After `M6-005` is complete, advance pointer to `M6-006`.
+After `M6-006` is complete, close M6 milestone and prepare next milestone planning pointer.

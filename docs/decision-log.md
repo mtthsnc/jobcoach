@@ -180,3 +180,15 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Keep only free-form `follow_up_actions` templates without structured follow-up planning blocks.
   - Generate follow-up copy inline in API handlers instead of a dedicated deterministic planner module.
+
+- Decision ID: `DEC-015`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: M6-005 required negotiation persistence semantics to support replay-safe regeneration and stale-write prevention, matching the versioned model already used for feedback and trajectory entities.
+- Decision: Version `NegotiationPlan` per `(candidate_id, target_role)` with optional `expected_version` and `regenerate` request controls, idempotent key replay/conflict handling, and `supersedes_negotiation_plan_id` linkage.
+- Consequences:
+  - Negotiation plan create/get flows are now conflict-safe and auditable across regeneration cycles.
+  - M6 contract and migration surface area increased (`version`, `supersedes_negotiation_plan_id`, request version fields), requiring M6-006 benchmarks to validate versioned outputs in quality gates.
+- Alternatives considered:
+  - Keep a single mutable negotiation row per candidate/role and overwrite in place.
+  - Rely on idempotency keys only without explicit version progression and optimistic conflict checks.

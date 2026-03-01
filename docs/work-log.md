@@ -1787,3 +1787,61 @@ Use UTC timestamps. Append entries only.
   - Full `make contract-test` remains blocked by two non-M6 contract failures in this environment; M6-004 follow-up planner contract/schema checks pass.
 - Next pointer:
   - Execute `M6-005` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T14:00:02Z
+- Execute `M6-005` versioned negotiation persistence semantics.
+- Task IDs: M6-005
+- Changes made:
+  - Started implementation of negotiation-plan version progression, idempotent regeneration semantics, and optimistic conflict handling.
+- Validation evidence:
+  - Planned: targeted negotiation unit/contract coverage, schema checks, migration smoke, and full make gates.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete `M6-005` and advance pointer to `M6-006`.
+
+- END
+- 2026-03-01T14:19:10Z
+- Execute `M6-005` versioned negotiation persistence semantics.
+- Task IDs: M6-005
+- Changes made:
+  - Added migration `infra/migrations/011_m6_negotiation_plan_versioning.sql`:
+    - `negotiation_plans.version` (non-null integer default),
+    - `supersedes_negotiation_plan_id` linkage,
+    - candidate/role version uniqueness and latest-version indexes with deterministic backfill.
+  - Updated negotiation persistence logic in `apps/api-gateway/api_gateway/repository.py`:
+    - version-aware idempotent replay/conflict responses,
+    - optimistic `expected_version` conflict detection,
+    - version increment + supersedes linkage on create,
+    - version/supersedes metadata retrieval for create/get paths.
+  - Updated negotiation API flow in `apps/api-gateway/api_gateway/app.py`:
+    - request validation for `expected_version` and `regenerate`,
+    - explicit `version_conflict` error semantics for negotiation plan creation.
+  - Extended contracts/schemas:
+    - `schemas/openapi/openapi-m0-m2.yaml`: `CreateNegotiationPlanRequest.expected_version/regenerate` and `NegotiationPlan.version/supersedes_negotiation_plan_id`.
+    - `schemas/jsonschema/core-schemas.json`: `NegotiationPlan.version/supersedes_negotiation_plan_id`.
+    - schema fixture update: `tests/contracts/fixtures/schema_validation/valid/negotiation_plan.json`.
+  - Extended unit/contract coverage:
+    - `tests/unit/test_job_spec_persistence.py`: negotiation version metadata assertions, invalid request checks, and regeneration/version-conflict progression test.
+    - `tests/contracts/test_job_ingestions_api_contract.py`: negotiation version metadata assertions, invalid request checks, regeneration/version-conflict contract test, and DB persistence helper assertions for version/supersedes.
+  - Updated planning artifacts:
+    - Marked `M6-005` as `DONE` in `docs/tasklist.md`.
+    - Advanced `docs/NEXT_ACTION.md` pointer to `M6-006`.
+    - Added decision `DEC-015` in `docs/decision-log.md`.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_create_and_get_negotiation_plan_persists_schema_valid_row tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_negotiation_plan_context_is_deterministic_for_fixed_history tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_negotiation_plan_endpoints_validate_request_shape_and_idempotency tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_negotiation_plan_regeneration_progression_and_expected_version_conflict`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/contracts/test_schema_validation.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 JOBCOACH_API_BASE_URL='http://127.0.0.1:8011' JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' python3 -m unittest -v tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_create_and_get_negotiation_plan_contract tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_negotiation_context_signals_are_deterministic_for_fixed_history_contract tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_negotiation_plan_validation_and_not_found_contract tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_negotiation_plan_expected_version_conflict_and_regeneration_contract`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+  - `make validate-openapi`
+  - `MIGRATE_DB_PATH=.tmp/m6-005-smoke-up.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh up`
+  - `MIGRATE_DB_PATH=.tmp/m6-005-smoke-down.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh down`
+  - `MIGRATE_DB_PATH=.tmp/m6-005-make-up.sqlite3 make migrate-up`
+  - `MIGRATE_DB_PATH=.tmp/m6-005-make-down.sqlite3 make migrate-down`
+  - `PYTHONDONTWRITEBYTECODE=1 make test`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL='http://127.0.0.1:8011' JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' make contract-test`
+- Blockers / risks:
+  - Contract test execution on default port `8000` is environment-sensitive in this workspace; isolated `JOBCOACH_API_BASE_URL` was used for deterministic local validation.
+- Next pointer:
+  - Execute `M6-006` from `docs/NEXT_ACTION.md`.
