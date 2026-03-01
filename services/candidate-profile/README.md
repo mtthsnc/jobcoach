@@ -1,12 +1,36 @@
 # services/candidate-profile
 
-Purpose: deterministic candidate-profile parsing and retrieval support for M2 ingestion flow.
-Owner: TBD
-Status: active in M2-004.
+## Purpose
 
-## Current Responsibilities
+Deterministic candidate profile parsing and STAR storybank generation for ingestion flows.
 
-- Parse candidate CV input (`cv_text` or `cv_document_ref`) into schema-aligned `CandidateProfile` payloads.
-- Extract summary, structured experience timeline records, and scored skill signals.
-- Generate STAR-structured storybank entries with competency tagging and evidence-quality scores.
-- Provide deterministic parsing behavior suitable for fixture-based regression tests.
+## Modules
+
+- `parser.py`: builds schema-aligned `CandidateProfile` payloads from CV text/reference input.
+- `storybank.py`: generates deterministic STAR stories with competency tags and evidence quality scoring.
+
+## Inputs
+
+- Candidate ingestion payload fields (`ingestion_id`, `candidate_id`, `cv_text` or `cv_document_ref`, `target_roles`, `story_notes`).
+- Parsed experience records used for story generation.
+
+## Outputs
+
+- `CandidateProfile` payload shape consumed by API handlers and persistence logic.
+- Storybank entries associated to a candidate profile.
+
+## Run and Validate
+
+- `make test`
+- `make benchmark-candidate-parse`
+- `make contract-test`
+
+## Dependencies
+
+- Canonical schema definitions in `schemas/jsonschema/core-schemas.json`.
+- Consumed by `apps/api-gateway` ingestion and retrieval endpoints.
+
+## Ownership and Status
+
+- Owner: TBD
+- Status: Active

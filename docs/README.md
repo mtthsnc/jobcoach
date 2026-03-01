@@ -13,6 +13,9 @@ If chat context runs out, a new session should resume by following this exact or
 
 ## File Map
 
+- `docs/api-surface.md`: Runtime API endpoint inventory and contract implementation status.
+- `docs/quality-gates.md`: Benchmark thresholds, test strategy, and validation command sequence.
+- `docs/persistence-versioning.md`: Storage model and idempotency/versioning semantics.
 - `docs/masterplan.md`: End-state vision, scope, architecture, and milestones.
 - `docs/implementation-plan.md`: Phase-by-phase engineering plan with acceptance gates.
 - `docs/monorepo-fresh-context.md`: Restart playbook for monorepo transition, then return to roadmap tasks.
