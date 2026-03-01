@@ -1407,6 +1407,26 @@ class JobIngestionAPI:
                     retryable=False,
                 ),
             )
+        if create_result.status == "version_conflict":
+            details: list[dict[str, str]] = []
+            if create_result.current_version is not None:
+                details.append(
+                    {
+                        "field": "expected_version",
+                        "reason": f"current version is {create_result.current_version}",
+                    }
+                )
+            return _json_response(
+                start_response,
+                HTTPStatus.CONFLICT,
+                _error_envelope(
+                    request_id=request_id,
+                    code="version_conflict",
+                    message="expected_version does not match current negotiation plan version",
+                    retryable=False,
+                    details=details or None,
+                ),
+            )
         if create_result.plan is None:
             return _json_response(
                 start_response,
@@ -2696,6 +2716,16 @@ def _validate_create_negotiation_plan_payload(payload: dict[str, Any]) -> list[d
     offer_deadline_date = payload.get("offer_deadline_date")
     if offer_deadline_date is not None and (not isinstance(offer_deadline_date, str) or not offer_deadline_date.strip()):
         errors.append({"field": "offer_deadline_date", "reason": "must be a non-empty ISO-8601 date string when provided"})
+
+    expected_version = payload.get("expected_version")
+    if expected_version is not None and (
+        not isinstance(expected_version, int) or isinstance(expected_version, bool) or expected_version < 0
+    ):
+        errors.append({"field": "expected_version", "reason": "must be an integer >= 0 when provided"})
+
+    regenerate = payload.get("regenerate")
+    if regenerate is not None and not isinstance(regenerate, bool):
+        errors.append({"field": "regenerate", "reason": "must be a boolean when provided"})
 
     return errors
 
