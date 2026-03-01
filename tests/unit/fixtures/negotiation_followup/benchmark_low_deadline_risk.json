@@ -1,0 +1,56 @@
+{
+  "case_id": "low_deadline_risk",
+  "target_role": "Associate Engineer",
+  "strategy_summary": "Anchor near 140000 with trajectory readiness evidence, protect 124000 as floor, and pre-handle momentum volatility objections.",
+  "anchor_band": {
+    "currency": "USD",
+    "floor_base_salary": 124000,
+    "target_base_salary": 133000,
+    "ceiling_base_salary": 140000,
+    "rationale": "Balanced negotiation range for early-career growth trajectory."
+  },
+  "concession_ladder": [
+    {
+      "step": 1,
+      "ask_base_salary": 140000,
+      "trigger": "If employer cites limited range.",
+      "concession": "Reduce ask in bounded increments.",
+      "exchange_for": "Written growth milestones and review checkpoint.",
+      "evidence": "Trajectory readiness supports role-level delivery expectations."
+    }
+  ],
+  "leverage_signals": [
+    {
+      "signal": "trajectory_readiness",
+      "strength": "medium",
+      "score": 63.0,
+      "evidence": "Readiness trend supports role transition confidence."
+    }
+  ],
+  "risk_signals": [
+    {
+      "signal": "deadline_pressure",
+      "severity": "low",
+      "score": 24.0,
+      "evidence": "Timeline allows room for coordinated follow-up cadence."
+    },
+    {
+      "signal": "momentum_volatility",
+      "severity": "medium",
+      "score": 58.0,
+      "evidence": "Limited recent history introduces variability risk."
+    }
+  ],
+  "evidence_links": [
+    {
+      "source_type": "candidate_profile",
+      "source_id": "cand_followup_002",
+      "detail": "Candidate strengths indicate reliable execution fundamentals."
+    }
+  ],
+  "expectations": {
+    "cadence_offsets": [0, 2, 5],
+    "branch_order": ["positive_signal", "needs_approval", "stalled_or_pushback"],
+    "actions_max_day_offset": 10
+  }
+}
