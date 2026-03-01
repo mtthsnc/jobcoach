@@ -2,6 +2,11 @@
 
 Runtime base path: `/v1`
 
+Auth guardrails:
+- `/v1/*` endpoints require `Authorization: Bearer <token>`.
+- `/health` remains unauthenticated for readiness/liveness probing.
+- Local-dev bypass is controlled explicitly via `JOBCOACH_AUTH_BYPASS=true`.
+
 ## Implemented Endpoints (API Gateway)
 
 - `POST /job-ingestions`

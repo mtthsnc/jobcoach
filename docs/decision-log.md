@@ -302,3 +302,20 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Start a new end-user feature milestone and defer operational hardening tasks.
   - Implement auth/logging/async orchestration as ad hoc patches without a dedicated milestone sequence and acceptance gates.
+
+- Decision ID: `DEC-025`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: `M8-001` required enforcing bearer authentication across `/v1` endpoints while preserving deterministic local execution and existing `/health` probe behavior.
+- Decision: Add a centralized gateway auth guard that:
+  - enforces `Authorization: Bearer <token>` for all `/v1` routes,
+  - returns deterministic `401 unauthorized` error envelopes (`missing_bearer_token`, `malformed_bearer_token`, `invalid_bearer_token`) with `WWW-Authenticate: Bearer realm="jobcoach-api"`,
+  - keeps `/health` unauthenticated,
+  - supports explicit local-dev bypass via `JOBCOACH_AUTH_BYPASS` and configurable bearer token via `JOBCOACH_API_BEARER_TOKEN`.
+- Consequences:
+  - All runtime `/v1` flows now require explicit bearer auth unless bypass is intentionally enabled.
+  - Unit and contract harnesses must provide deterministic auth headers by default to preserve existing behavior coverage.
+  - Operational logging/redaction work in `M8-002` can assume authenticated request context semantics are stable.
+- Alternatives considered:
+  - Require bearer-format only (no token-value validation) and defer token validation to downstream services.
+  - Leave auth disabled by default in local runtime and enable only in selected environments, risking drift from production guardrails.

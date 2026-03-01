@@ -25,6 +25,7 @@ from api_gateway.app import create_app
 
 MIGRATIONS_DIR = ROOT / "infra" / "migrations"
 VALIDATOR_PATH = ROOT / "services" / "quality-eval" / "schema_validation" / "validator.py"
+TEST_BEARER_TOKEN = "unit-test-token"
 
 UP_MARKER = re.compile(r"^\s*--\s*\+goose\s+Up\s*$")
 DOWN_MARKER = re.compile(r"^\s*--\s*\+goose\s+Down\s*$")
@@ -84,6 +85,7 @@ def _request(
     path: str,
     body: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
+    add_default_auth: bool = True,
 ) -> tuple[int, dict[str, str], dict[str, Any]]:
     body_bytes = b""
     if body is not None:
@@ -99,8 +101,12 @@ def _request(
         "CONTENT_TYPE": "application/json",
     }
 
-    if headers:
-        for key, value in headers.items():
+    request_headers = dict(headers or {})
+    if add_default_auth and path_info.startswith("/v1") and "Authorization" not in request_headers:
+        request_headers["Authorization"] = f"Bearer {TEST_BEARER_TOKEN}"
+
+    if request_headers:
+        for key, value in request_headers.items():
             normalized = key.upper().replace("-", "_")
             environ[f"HTTP_{normalized}"] = value
 
@@ -129,7 +135,7 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory(prefix="job-spec-persist-")
         self.db_path = Path(self._tmpdir.name) / "jobcoach.sqlite3"
         _bootstrap_sqlite_schema(self.db_path)
-        self.app = create_app(db_path=self.db_path)
+        self.app = create_app(db_path=self.db_path, bearer_token=TEST_BEARER_TOKEN)
 
     def tearDown(self) -> None:
         self._tmpdir.cleanup()
@@ -286,6 +292,98 @@ class JobSpecPersistenceTest(unittest.TestCase):
             error_message=error_message,
         )
         return eval_run_id
+
+    def test_health_endpoint_is_public_without_authorization(self) -> None:
+        status, _, body = _request(
+            self.app,
+            method="GET",
+            path="/health",
+            add_default_auth=False,
+        )
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body.get("data", {}).get("status"), "ok")
+        self.assertIsNone(body.get("error"))
+
+    def test_v1_endpoint_missing_bearer_token_returns_401(self) -> None:
+        status, headers, body = _request(
+            self.app,
+            method="POST",
+            path="/v1/job-ingestions",
+            body={"source_type": "text", "source_value": "Backend Engineer"},
+            headers={"Idempotency-Key": "auth-missing-token-001"},
+            add_default_auth=False,
+        )
+
+        self.assertEqual(status, 401, body)
+        self.assertEqual(headers.get("WWW-Authenticate"), 'Bearer realm="jobcoach-api"')
+        self.assertEqual(body.get("error", {}).get("code"), "unauthorized")
+        self.assertEqual(body.get("error", {}).get("message"), "Authorization header with Bearer token is required")
+        self.assertEqual(
+            body.get("error", {}).get("details"),
+            [{"field": "Authorization", "reason": "missing_bearer_token"}],
+        )
+
+    def test_v1_endpoint_malformed_bearer_token_returns_401(self) -> None:
+        status, _, body = _request(
+            self.app,
+            method="POST",
+            path="/v1/job-ingestions",
+            body={"source_type": "text", "source_value": "Backend Engineer"},
+            headers={
+                "Idempotency-Key": "auth-malformed-token-001",
+                "Authorization": "Token malformed",
+            },
+            add_default_auth=False,
+        )
+
+        self.assertEqual(status, 401, body)
+        self.assertEqual(body.get("error", {}).get("code"), "unauthorized")
+        self.assertEqual(body.get("error", {}).get("message"), "Authorization header must use Bearer token format")
+        self.assertEqual(
+            body.get("error", {}).get("details"),
+            [{"field": "Authorization", "reason": "malformed_bearer_token"}],
+        )
+
+    def test_v1_endpoint_invalid_bearer_token_returns_401(self) -> None:
+        status, _, body = _request(
+            self.app,
+            method="POST",
+            path="/v1/job-ingestions",
+            body={"source_type": "text", "source_value": "Backend Engineer"},
+            headers={
+                "Idempotency-Key": "auth-invalid-token-001",
+                "Authorization": "Bearer invalid-unit-token",
+            },
+            add_default_auth=False,
+        )
+
+        self.assertEqual(status, 401, body)
+        self.assertEqual(body.get("error", {}).get("code"), "unauthorized")
+        self.assertEqual(body.get("error", {}).get("message"), "Bearer token is invalid")
+        self.assertEqual(
+            body.get("error", {}).get("details"),
+            [{"field": "Authorization", "reason": "invalid_bearer_token"}],
+        )
+
+    def test_local_dev_auth_bypass_allows_v1_without_authorization(self) -> None:
+        bypass_app = create_app(
+            db_path=self.db_path,
+            auth_bypass_enabled=True,
+            bearer_token=TEST_BEARER_TOKEN,
+        )
+        status, _, body = _request(
+            bypass_app,
+            method="POST",
+            path="/v1/job-ingestions",
+            body={"source_type": "text", "source_value": "Backend Engineer"},
+            headers={"Idempotency-Key": "auth-bypass-token-001"},
+            add_default_auth=False,
+        )
+
+        self.assertEqual(status, 202, body)
+        self.assertEqual(body.get("error"), None)
+        self.assertEqual(body.get("data", {}).get("status"), "queued")
 
     def test_taxonomy_normalize_endpoint_returns_deterministic_mapped_and_unmapped_terms(self) -> None:
         status, _, body = _request(

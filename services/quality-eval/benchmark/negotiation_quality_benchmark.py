@@ -483,6 +483,8 @@ def run_benchmark(
         negotiation_context_aggregator=aggregator_module.DeterministicNegotiationContextAggregator(),
         negotiation_strategy_generator=strategy_module.DeterministicNegotiationStrategyGenerator(),
         negotiation_followup_planner=followup_module.DeterministicNegotiationFollowupPlanner(),
+        auth_bypass_enabled=True,
+        bearer_token="benchmark-token",
     )
     validator = validator_module.CoreSchemaValidator.from_file()
 

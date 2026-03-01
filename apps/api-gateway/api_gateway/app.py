@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import importlib.util
 import json
 import os
@@ -56,6 +57,9 @@ CANDIDATE_PROGRESS_DASHBOARD_SUFFIX = "/progress-dashboard"
 TAXONOMY_NORMALIZE_ROUTE = "/v1/taxonomy/normalize"
 FOLLOWUP_OVERRIDE_CONFIDENCE_THRESHOLD = 0.80
 TAXONOMY_VERSION = "m1-taxonomy-v1"
+DEFAULT_BEARER_TOKEN = "local-dev-token"
+AUTH_BYPASS_ENV_VAR = "JOBCOACH_AUTH_BYPASS"
+AUTH_BEARER_TOKEN_ENV_VAR = "JOBCOACH_API_BEARER_TOKEN"
 IMMUTABLE_JOB_SPEC_PATCH_FIELDS = {"job_spec_id", "source", "version"}
 MUTABLE_JOB_SPEC_PATCH_FIELDS = {
     "company",
@@ -149,6 +153,8 @@ class JobIngestionAPI:
         negotiation_context_aggregator: Any,
         negotiation_strategy_generator: Any,
         negotiation_followup_planner: Any,
+        auth_bypass_enabled: bool,
+        bearer_token: str,
     ) -> None:
         self._repository = repository
         self._extraction_worker = extraction_worker
@@ -163,6 +169,8 @@ class JobIngestionAPI:
         self._negotiation_context_aggregator = negotiation_context_aggregator
         self._negotiation_strategy_generator = negotiation_strategy_generator
         self._negotiation_followup_planner = negotiation_followup_planner
+        self._auth_bypass_enabled = auth_bypass_enabled
+        self._bearer_token = bearer_token
 
     def __call__(self, environ: dict[str, Any], start_response: Any) -> list[bytes]:
         method = str(environ.get("REQUEST_METHOD", "")).upper()
@@ -184,6 +192,15 @@ class JobIngestionAPI:
                     request_id=request_id,
                     data={"status": "ok"},
                 ),
+            )
+
+        unauthorized_payload = self._authorize_v1_request(environ=environ, request_id=request_id, path=path)
+        if unauthorized_payload is not None:
+            return _json_response(
+                start_response,
+                HTTPStatus.UNAUTHORIZED,
+                unauthorized_payload,
+                headers=[("WWW-Authenticate", 'Bearer realm="jobcoach-api"')],
             )
 
         if path == "/v1/job-ingestions":
@@ -552,6 +569,49 @@ class JobIngestionAPI:
             HTTPStatus.NOT_FOUND,
             _error_envelope(request_id=request_id, code="not_found", message="Resource not found", retryable=False),
         )
+
+    def _authorize_v1_request(
+        self,
+        *,
+        environ: dict[str, Any],
+        request_id: str,
+        path: str,
+    ) -> dict[str, Any] | None:
+        if path != "/v1" and not path.startswith("/v1/"):
+            return None
+        if self._auth_bypass_enabled:
+            return None
+
+        auth_header = str(environ.get("HTTP_AUTHORIZATION", "")).strip()
+        if not auth_header:
+            return _error_envelope(
+                request_id=request_id,
+                code="unauthorized",
+                message="Authorization header with Bearer token is required",
+                retryable=False,
+                details=[{"field": "Authorization", "reason": "missing_bearer_token"}],
+            )
+
+        prefix, _, raw_token = auth_header.partition(" ")
+        if prefix != "Bearer" or not raw_token.strip():
+            return _error_envelope(
+                request_id=request_id,
+                code="unauthorized",
+                message="Authorization header must use Bearer token format",
+                retryable=False,
+                details=[{"field": "Authorization", "reason": "malformed_bearer_token"}],
+            )
+
+        if not hmac.compare_digest(raw_token.strip(), self._bearer_token):
+            return _error_envelope(
+                request_id=request_id,
+                code="unauthorized",
+                message="Bearer token is invalid",
+                retryable=False,
+                details=[{"field": "Authorization", "reason": "invalid_bearer_token"}],
+            )
+
+        return None
 
     def _handle_create(self, environ: dict[str, Any], start_response: Any, *, request_id: str) -> list[bytes]:
         idempotency_key = str(environ.get("HTTP_IDEMPOTENCY_KEY", "")).strip()
@@ -2886,8 +2946,23 @@ class JobIngestionAPI:
         }
 
 
-def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
+def create_app(
+    db_path: str | Path | None = None,
+    *,
+    auth_bypass_enabled: bool | None = None,
+    bearer_token: str | None = None,
+) -> JobIngestionAPI:
     resolved_db_path = db_path or os.environ.get("JOBCOACH_DB_PATH") or ".tmp/migrate-local.sqlite3"
+    resolved_auth_bypass_enabled = (
+        auth_bypass_enabled
+        if auth_bypass_enabled is not None
+        else _parse_env_flag(os.environ.get(AUTH_BYPASS_ENV_VAR), default=False)
+    )
+    resolved_bearer_token = bearer_token
+    if resolved_bearer_token is None:
+        resolved_bearer_token = os.environ.get(AUTH_BEARER_TOKEN_ENV_VAR, DEFAULT_BEARER_TOKEN)
+    resolved_bearer_token = str(resolved_bearer_token).strip() or DEFAULT_BEARER_TOKEN
+
     extraction_worker = _JOB_EXTRACTION_MODULE.JobExtractionWorker()
     taxonomy_normalizer = _TAXONOMY_MODULE.TaxonomyNormalizer.from_file()
     schema_validator = _SCHEMA_VALIDATOR_MODULE.CoreSchemaValidator.from_file()
@@ -2914,7 +2989,21 @@ def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
         negotiation_context_aggregator=negotiation_context_aggregator,
         negotiation_strategy_generator=negotiation_strategy_generator,
         negotiation_followup_planner=negotiation_followup_planner,
+        auth_bypass_enabled=resolved_auth_bypass_enabled,
+        bearer_token=resolved_bearer_token,
     )
+
+
+def _parse_env_flag(raw_value: str | None, *, default: bool) -> bool:
+    if raw_value is None:
+        return default
+
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 def _parse_json_payload(environ: dict[str, Any]) -> tuple[dict[str, Any], str | None]:

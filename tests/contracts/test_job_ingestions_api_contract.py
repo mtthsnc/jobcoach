@@ -24,6 +24,7 @@ DEFAULT_API_BASE_URL = "http://127.0.0.1:8000"
 API_PREFIX = "/v1"
 READINESS_TIMEOUT_SECONDS = 15.0
 REQUEST_TIMEOUT_SECONDS = 5.0
+CONTRACT_BEARER_TOKEN = "contract-test-token"
 
 UP_MARKER = re.compile(r"^\s*--\s*\+goose\s+Up\s*$")
 DOWN_MARKER = re.compile(r"^\s*--\s*\+goose\s+Down\s*$")
@@ -87,6 +88,8 @@ class _LocalApiProcess:
         env["JOBCOACH_DB_PATH"] = str(self._db_path)
         env["SQLITE_DB_PATH"] = str(self._db_path)
         env["DATABASE_URL"] = f"sqlite:///{self._db_path}"
+        env["JOBCOACH_API_BEARER_TOKEN"] = CONTRACT_BEARER_TOKEN
+        env["JOBCOACH_AUTH_BYPASS"] = "false"
 
         self._process = subprocess.Popen(
             self._command,
@@ -166,9 +169,13 @@ def _request_json(
     path: str,
     body: dict | None = None,
     headers: dict[str, str] | None = None,
+    add_default_auth: bool = True,
 ) -> tuple[int, dict]:
+    path_only = path.split("?", 1)[0]
     payload = None if body is None else json.dumps(body).encode("utf-8")
     request_headers = {"Accept": "application/json"}
+    if add_default_auth and path_only.startswith(f"{API_PREFIX}/") and "Authorization" not in (headers or {}):
+        request_headers["Authorization"] = f"Bearer {CONTRACT_BEARER_TOKEN}"
     if body is not None:
         request_headers["Content-Type"] = "application/json"
     if headers:
@@ -237,6 +244,78 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertIn("feedback_reports", table_names)
         self.assertIn("negotiation_plans", table_names)
         self.assertIn("trajectory_plans", table_names)
+
+    def test_health_endpoint_is_public_without_authorization(self) -> None:
+        status, body = _request_json(
+            self.base_url,
+            "GET",
+            "/health",
+            add_default_auth=False,
+        )
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body.get("data", {}).get("status"), "ok")
+        self.assertIsNone(body.get("error"))
+
+    def test_v1_endpoint_missing_bearer_token_returns_contract_401(self) -> None:
+        status, body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/job-ingestions",
+            body={"source_type": "text", "source_value": "Contract auth test"},
+            headers={"Idempotency-Key": f"contract-auth-missing-{uuid.uuid4()}"},
+            add_default_auth=False,
+        )
+
+        self.assertEqual(status, 401, body)
+        self.assertEqual(body.get("error", {}).get("code"), "unauthorized")
+        self.assertEqual(body.get("error", {}).get("message"), "Authorization header with Bearer token is required")
+        self.assertEqual(
+            body.get("error", {}).get("details"),
+            [{"field": "Authorization", "reason": "missing_bearer_token"}],
+        )
+
+    def test_v1_endpoint_malformed_bearer_token_returns_contract_401(self) -> None:
+        status, body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/job-ingestions",
+            body={"source_type": "text", "source_value": "Contract auth test"},
+            headers={
+                "Idempotency-Key": f"contract-auth-malformed-{uuid.uuid4()}",
+                "Authorization": "Token malformed",
+            },
+            add_default_auth=False,
+        )
+
+        self.assertEqual(status, 401, body)
+        self.assertEqual(body.get("error", {}).get("code"), "unauthorized")
+        self.assertEqual(body.get("error", {}).get("message"), "Authorization header must use Bearer token format")
+        self.assertEqual(
+            body.get("error", {}).get("details"),
+            [{"field": "Authorization", "reason": "malformed_bearer_token"}],
+        )
+
+    def test_v1_endpoint_invalid_bearer_token_returns_contract_401(self) -> None:
+        status, body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/job-ingestions",
+            body={"source_type": "text", "source_value": "Contract auth test"},
+            headers={
+                "Idempotency-Key": f"contract-auth-invalid-{uuid.uuid4()}",
+                "Authorization": "Bearer invalid-contract-token",
+            },
+            add_default_auth=False,
+        )
+
+        self.assertEqual(status, 401, body)
+        self.assertEqual(body.get("error", {}).get("code"), "unauthorized")
+        self.assertEqual(body.get("error", {}).get("message"), "Bearer token is invalid")
+        self.assertEqual(
+            body.get("error", {}).get("details"),
+            [{"field": "Authorization", "reason": "invalid_bearer_token"}],
+        )
 
     def test_post_and_get_job_ingestion_contract(self) -> None:
         payload = _load_fixture("create_request.json")

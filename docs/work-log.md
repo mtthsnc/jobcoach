@@ -2327,3 +2327,51 @@ Use UTC timestamps. Append entries only.
   - No blockers encountered.
 - Next pointer:
   - Execute `M8-001` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T21:00:21Z
+- Execute `M8-001` bearer-auth guardrails on `/v1` endpoints.
+- Task IDs: M8-001
+- Changes made:
+  - Started implementation of gateway bearer authentication enforcement, deterministic unauthorized responses, and local-dev bypass controls.
+- Validation evidence:
+  - Planned: targeted unit/contract auth tests, then full `make test`, `make validate-openapi`, migrate up/down checks, and `make contract-test`.
+- Blockers / risks:
+  - Contract tests expected to require elevated execution in this sandbox due local API bind restrictions.
+- Next pointer:
+  - Complete `M8-001` implementation/tests and advance pointer to `M8-002`.
+
+- END
+- 2026-03-01T21:12:43Z
+- Execute `M8-001` bearer-auth guardrails on `/v1` endpoints.
+- Task IDs: M8-001
+- Changes made:
+  - Implemented centralized `/v1` bearer-auth guardrails in `apps/api-gateway/api_gateway/app.py`:
+    - enforced `Authorization: Bearer <token>` for all `/v1` routes with deterministic `401 unauthorized` envelopes,
+    - returned explicit missing/malformed/invalid bearer reasons and `WWW-Authenticate: Bearer realm="jobcoach-api"`,
+    - preserved unauthenticated `/health` behavior,
+    - added explicit local-dev bypass control (`JOBCOACH_AUTH_BYPASS`) and configurable token env (`JOBCOACH_API_BEARER_TOKEN`) in `create_app`.
+  - Extended unit harness/auth coverage in `tests/unit/test_job_spec_persistence.py`:
+    - default `/v1` auth header injection for existing authorized-path tests,
+    - new tests for `/health` public access, missing/malformed/invalid bearer `401`s, and bypass-enabled success path.
+  - Extended contract harness/auth coverage in `tests/contracts/test_job_ingestions_api_contract.py`:
+    - default `/v1` auth header injection with deterministic contract token wiring in spawned API process env,
+    - new contract tests for `/health` public access and missing/malformed/invalid bearer `401` semantics.
+  - Updated benchmark compatibility in `services/quality-eval/benchmark/negotiation_quality_benchmark.py` for direct `JobIngestionAPI` construction by supplying auth constructor fields.
+  - Updated continuity/docs:
+    - `docs/tasklist.md`: marked `M8-001` as `DONE`; advanced NEXT queue to `M8-002` then `M8-003`.
+    - `docs/NEXT_ACTION.md`: advanced active pointer to `M8-002`.
+    - `docs/decision-log.md`: added `DEC-025` for auth guardrail design and env controls.
+    - `docs/api-surface.md`: documented `/v1` auth requirement and `/health` exemption.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_health_endpoint_is_public_without_authorization tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_v1_endpoint_missing_bearer_token_returns_401 tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_v1_endpoint_malformed_bearer_token_returns_401 tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_v1_endpoint_invalid_bearer_token_returns_401 tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_local_dev_auth_bypass_allows_v1_without_authorization`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_health_endpoint_is_public_without_authorization tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_v1_endpoint_missing_bearer_token_returns_contract_401 tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_v1_endpoint_malformed_bearer_token_returns_contract_401 tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_v1_endpoint_invalid_bearer_token_returns_contract_401` (initial sandbox bind failure; pass on elevated rerun)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 make test` (pass; includes full unit + benchmark gates)
+  - `make validate-openapi` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m8-001-migrate-up.sqlite3 make migrate-up` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m8-001-migrate-down.sqlite3 make migrate-down` (pass)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test` (initial sandbox bind failure; pass on elevated rerun)
+- Blockers / risks:
+  - In this sandbox, contract tests require elevated execution due local API socket bind restrictions.
+- Next pointer:
+  - Execute `M8-002` from `docs/NEXT_ACTION.md`.

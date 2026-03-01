@@ -6,32 +6,35 @@
 
 ## Active Task
 
-- Task ID: `M8-001`
-- Task: Enforce bearer-auth guardrails on `/v1` endpoints with deterministic unauthorized responses and local-dev bypass control.
-- Why now: `M8-PLAN-001` is complete, and auth enforcement is the first dependency for downstream M8 observability and async orchestration hardening tasks.
+- Task ID: `M8-002`
+- Task: Add structured request logging with request-id propagation, latency metrics, and sensitive-field redaction policy.
+- Why now: `M8-001` auth guardrails are complete, so observability/redaction hardening is the next prerequisite for reliable outbox relay and async worker operations.
 
 ## Exact Next Steps
 
-1. Implement auth guardrails in the gateway:
-   - require bearer token validation for `/v1` endpoints,
-   - preserve `/health` unauthenticated behavior,
-   - add explicit local-dev bypass env control for deterministic local test execution.
-2. Align contracts/tests with auth semantics:
-   - update OpenAPI/error schema usage if needed for unauthorized responses,
-   - add/extend unit + contract tests for missing, malformed, and valid bearer token flows.
-3. Run validation and record handoff:
+1. Implement structured logging middleware in the gateway:
+   - emit method/path/status/request_id/latency_ms for each request,
+   - preserve deterministic request-id propagation from `x-request-id` when supplied,
+   - ensure logging includes auth failure paths and success paths consistently.
+2. Enforce sensitive-field redaction policy in logs:
+   - prevent raw payload leakage for high-risk text fields (`cv_text`, story notes, large free-text source values),
+   - log bounded/redacted metadata instead of full sensitive text.
+3. Align tests/contracts with observability semantics:
+   - add/extend unit tests for request-id propagation, latency field presence, and redaction coverage,
+   - update contract harness assertions only where externally visible behavior changes.
+4. Run validation and record handoff:
    - execute targeted tests plus full gates (`make test`, `make validate-openapi`, migrate up/down, `make contract-test`),
    - append START/END execution evidence in `docs/work-log.md`,
-   - move pointer to `M8-002` after acceptance criteria pass.
+   - move pointer to `M8-003` after acceptance criteria pass.
 
 ## Validation Required
 
-- Confirm `M8-001` acceptance criteria:
-  - Missing/malformed bearer tokens return deterministic contract-valid `401` envelopes.
-  - Authorized requests preserve existing endpoint behavior.
-  - Local-dev bypass control is explicit, deterministic, and covered by tests.
+- Confirm `M8-002` acceptance criteria:
+  - Logs emit deterministic route/method/status/latency/request_id fields.
+  - Request IDs propagate from inbound header when present, and generated IDs remain deterministic in envelope/log linkage.
+  - Sensitive request fields are redacted/bounded in logs (no raw CV/story free-text leakage).
   - Validation evidence is captured in `docs/work-log.md`.
 
 ## Return Pointer
 
-After `M8-001` is complete, execute `M8-002`.
+After `M8-002` is complete, execute `M8-003`.
