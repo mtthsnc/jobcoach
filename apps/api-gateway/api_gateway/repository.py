@@ -60,6 +60,14 @@ class CandidateCreateResult:
 
 
 @dataclass(frozen=True)
+class TaxonomyMappingRecord:
+    taxonomy_version: str
+    input_term: str
+    canonical_term: str
+    confidence: float
+
+
+@dataclass(frozen=True)
 class JobSpecReviewResult:
     status: str
     job_spec: dict[str, Any] | None
@@ -92,6 +100,12 @@ class NegotiationPlanCreateResult:
     status: str
     plan: dict[str, Any] | None
     current_version: int | None
+
+
+@dataclass(frozen=True)
+class EvalRunCreateResult:
+    status: str
+    eval_run: dict[str, Any] | None
 
 
 class SQLiteJobIngestionRepository:
@@ -232,6 +246,326 @@ class SQLiteJobIngestionRepository:
             ).fetchone()
 
         return _row_to_candidate_record(row) if row is not None else None
+
+    def get_taxonomy_mapping(self, *, taxonomy_version: str, input_term: str) -> TaxonomyMappingRecord | None:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT taxonomy_version, input_term, canonical_term, confidence
+                FROM taxonomy_mappings
+                WHERE taxonomy_version = ? AND input_term = ?
+                """,
+                (taxonomy_version, input_term),
+            ).fetchone()
+
+        return _row_to_taxonomy_mapping(row) if row is not None else None
+
+    def create_or_get_taxonomy_mapping(
+        self,
+        *,
+        taxonomy_version: str,
+        input_term: str,
+        canonical_term: str,
+        confidence: float,
+    ) -> TaxonomyMappingRecord:
+        mapping_id = f"map_{uuid4().hex}"
+
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO taxonomy_mappings (
+                        mapping_id,
+                        taxonomy_version,
+                        input_term,
+                        canonical_term,
+                        confidence
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        mapping_id,
+                        taxonomy_version,
+                        input_term,
+                        canonical_term,
+                        float(confidence),
+                    ),
+                )
+                row = connection.execute(
+                    """
+                    SELECT taxonomy_version, input_term, canonical_term, confidence
+                    FROM taxonomy_mappings
+                    WHERE taxonomy_version = ? AND input_term = ?
+                    """,
+                    (taxonomy_version, input_term),
+                ).fetchone()
+
+        if row is None:
+            raise RuntimeError("taxonomy mapping row could not be loaded after create-or-get")
+
+        return _row_to_taxonomy_mapping(row)
+
+    def create_or_get_eval_run(
+        self,
+        *,
+        idempotency_key: str,
+        request_payload: dict[str, Any],
+        suite: str,
+    ) -> EvalRunCreateResult:
+        normalized_idempotency_key = str(idempotency_key).strip()
+        if not normalized_idempotency_key:
+            raise ValueError("idempotency_key must be a non-empty string")
+
+        normalized_suite = str(suite).strip()
+        if not normalized_suite:
+            raise ValueError("suite must be a non-empty string")
+
+        request_json = _canonical_json(request_payload)
+        eval_run_id = f"eval_{uuid4().hex}"
+
+        with closing(self._connect()) as connection:
+            with connection:
+                existing_row = connection.execute(
+                    """
+                    SELECT
+                        eval_run_id,
+                        suite,
+                        status,
+                        metrics_json,
+                        error_code,
+                        error_message,
+                        created_at,
+                        started_at,
+                        completed_at,
+                        request_json
+                    FROM eval_runs
+                    WHERE idempotency_key = ?
+                    """,
+                    (normalized_idempotency_key,),
+                ).fetchone()
+                if existing_row is not None:
+                    existing_request_json_raw = existing_row["request_json"]
+                    existing_request_json = (
+                        str(existing_request_json_raw)
+                        if isinstance(existing_request_json_raw, str)
+                        else ""
+                    )
+                    is_replay = (
+                        existing_request_json == request_json
+                        if existing_request_json
+                        else str(existing_row["suite"]) == normalized_suite
+                    )
+                    return EvalRunCreateResult(
+                        status="idempotent_replay" if is_replay else "idempotency_conflict",
+                        eval_run=_row_to_eval_run(existing_row),
+                    )
+
+                try:
+                    connection.execute(
+                        """
+                        INSERT INTO eval_runs (
+                            eval_run_id,
+                            suite,
+                            status,
+                            idempotency_key,
+                            request_json
+                        )
+                        VALUES (?, ?, 'queued', ?, ?)
+                        """,
+                        (
+                            eval_run_id,
+                            normalized_suite,
+                            normalized_idempotency_key,
+                            request_json,
+                        ),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    if "idempotency_key" not in str(exc):
+                        raise
+                    row = connection.execute(
+                        """
+                        SELECT
+                            eval_run_id,
+                            suite,
+                            status,
+                            metrics_json,
+                            error_code,
+                            error_message,
+                            created_at,
+                            started_at,
+                            completed_at,
+                            request_json
+                        FROM eval_runs
+                        WHERE idempotency_key = ?
+                        """,
+                        (normalized_idempotency_key,),
+                    ).fetchone()
+                    if row is None:
+                        raise RuntimeError("Eval run idempotent lookup failed after unique key collision")
+                    existing_request_json_raw = row["request_json"]
+                    existing_request_json = (
+                        str(existing_request_json_raw)
+                        if isinstance(existing_request_json_raw, str)
+                        else ""
+                    )
+                    is_replay = (
+                        existing_request_json == request_json
+                        if existing_request_json
+                        else str(row["suite"]) == normalized_suite
+                    )
+                    return EvalRunCreateResult(
+                        status="idempotent_replay" if is_replay else "idempotency_conflict",
+                        eval_run=_row_to_eval_run(row),
+                    )
+
+                created_row = connection.execute(
+                    """
+                    SELECT
+                        eval_run_id,
+                        suite,
+                        status,
+                        metrics_json,
+                        error_code,
+                        error_message,
+                        created_at,
+                        started_at,
+                        completed_at
+                    FROM eval_runs
+                    WHERE eval_run_id = ?
+                    """,
+                    (eval_run_id,),
+                ).fetchone()
+                if created_row is None:
+                    raise RuntimeError("Inserted eval run row could not be loaded")
+                return EvalRunCreateResult(
+                    status="created",
+                    eval_run=_row_to_eval_run(created_row),
+                )
+
+    def get_eval_run_by_id(self, eval_run_id: str) -> dict[str, Any] | None:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    eval_run_id,
+                    suite,
+                    status,
+                    metrics_json,
+                    error_code,
+                    error_message,
+                    created_at,
+                    started_at,
+                    completed_at
+                FROM eval_runs
+                WHERE eval_run_id = ?
+                """,
+                (eval_run_id,),
+            ).fetchone()
+
+        return _row_to_eval_run(row) if row is not None else None
+
+    def mark_eval_run_running(self, *, eval_run_id: str) -> dict[str, Any] | None:
+        normalized_eval_run_id = str(eval_run_id).strip()
+        if not normalized_eval_run_id:
+            raise ValueError("eval_run_id must be a non-empty string")
+
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute(
+                    """
+                    UPDATE eval_runs
+                    SET status = 'running',
+                        started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+                        error_code = NULL,
+                        error_message = NULL
+                    WHERE eval_run_id = ?
+                      AND status = 'queued'
+                    """,
+                    (normalized_eval_run_id,),
+                )
+                row = connection.execute(
+                    """
+                    SELECT
+                        eval_run_id,
+                        suite,
+                        status,
+                        metrics_json,
+                        error_code,
+                        error_message,
+                        created_at,
+                        started_at,
+                        completed_at
+                    FROM eval_runs
+                    WHERE eval_run_id = ?
+                    """,
+                    (normalized_eval_run_id,),
+                ).fetchone()
+
+        return _row_to_eval_run(row) if row is not None else None
+
+    def complete_eval_run(
+        self,
+        *,
+        eval_run_id: str,
+        status: str,
+        metrics: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> dict[str, Any] | None:
+        normalized_eval_run_id = str(eval_run_id).strip()
+        if not normalized_eval_run_id:
+            raise ValueError("eval_run_id must be a non-empty string")
+
+        normalized_status = str(status).strip()
+        if normalized_status not in {"succeeded", "failed"}:
+            raise ValueError("status must be one of: succeeded, failed")
+
+        normalized_metrics = metrics if isinstance(metrics, dict) else {}
+        metrics_json = _canonical_json(normalized_metrics)
+        normalized_error_code = None if normalized_status == "succeeded" else error_code
+        normalized_error_message = None if normalized_status == "succeeded" else error_message
+
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute(
+                    """
+                    UPDATE eval_runs
+                    SET status = ?,
+                        metrics_json = ?,
+                        error_code = ?,
+                        error_message = ?,
+                        started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+                        completed_at = CURRENT_TIMESTAMP
+                    WHERE eval_run_id = ?
+                      AND status IN ('queued', 'running')
+                    """,
+                    (
+                        normalized_status,
+                        metrics_json,
+                        normalized_error_code,
+                        normalized_error_message,
+                        normalized_eval_run_id,
+                    ),
+                )
+                row = connection.execute(
+                    """
+                    SELECT
+                        eval_run_id,
+                        suite,
+                        status,
+                        metrics_json,
+                        error_code,
+                        error_message,
+                        created_at,
+                        started_at,
+                        completed_at
+                    FROM eval_runs
+                    WHERE eval_run_id = ?
+                    """,
+                    (normalized_eval_run_id,),
+                ).fetchone()
+
+        return _row_to_eval_run(row) if row is not None else None
 
     def persist_candidate_profile(self, *, ingestion_id: str, candidate_profile: dict[str, Any]) -> str:
         target_roles = candidate_profile.get("target_roles")
@@ -1356,6 +1690,39 @@ def _row_to_candidate_record(row: sqlite3.Row) -> CandidateIngestionRecord:
         error_retryable=bool(row["error_retryable"]) if row["error_retryable"] is not None else None,
         error_details=error_details,
     )
+
+
+def _row_to_taxonomy_mapping(row: sqlite3.Row) -> TaxonomyMappingRecord:
+    return TaxonomyMappingRecord(
+        taxonomy_version=str(row["taxonomy_version"]),
+        input_term=str(row["input_term"]),
+        canonical_term=str(row["canonical_term"]),
+        confidence=float(row["confidence"]),
+    )
+
+
+def _row_to_eval_run(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+
+    payload: dict[str, Any] = {
+        "eval_run_id": str(row["eval_run_id"]),
+        "suite": str(row["suite"]),
+        "status": str(row["status"]),
+        "metrics": _decode_json_object(str(row["metrics_json"])) if row["metrics_json"] is not None else {},
+    }
+    if row["error_code"] is not None or row["error_message"] is not None:
+        payload["error"] = {
+            "code": str(row["error_code"]) if row["error_code"] is not None else "",
+            "message": str(row["error_message"]) if row["error_message"] is not None else "",
+        }
+    if row["created_at"] is not None:
+        payload["created_at"] = str(row["created_at"])
+    if row["started_at"] is not None:
+        payload["started_at"] = str(row["started_at"])
+    if row["completed_at"] is not None:
+        payload["completed_at"] = str(row["completed_at"])
+    return payload
 
 
 def _row_to_job_spec(row: sqlite3.Row) -> dict[str, Any]:
