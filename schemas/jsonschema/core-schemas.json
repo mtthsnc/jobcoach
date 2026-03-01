@@ -259,6 +259,7 @@
         "anchor_band",
         "concession_ladder",
         "objection_playbook",
+        "follow_up_plan",
         "talking_points",
         "follow_up_actions",
         "generated_at"
@@ -381,6 +382,63 @@
             }
           }
         },
+        "follow_up_plan": {
+          "type": "object",
+          "required": ["thank_you_note", "recruiter_cadence", "outcome_branches"],
+          "properties": {
+            "thank_you_note": {
+              "type": "object",
+              "required": ["send_by_day_offset", "subject", "body", "key_points"],
+              "properties": {
+                "send_by_day_offset": { "type": "integer", "minimum": 0, "maximum": 14 },
+                "subject": { "type": "string" },
+                "body": { "type": "string" },
+                "key_points": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string" }
+                }
+              }
+            },
+            "recruiter_cadence": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["day_offset", "channel", "objective", "message"],
+                "properties": {
+                  "day_offset": { "type": "integer", "minimum": 0, "maximum": 30 },
+                  "channel": { "type": "string", "enum": ["email", "phone", "linkedin"] },
+                  "objective": { "type": "string" },
+                  "message": { "type": "string" }
+                }
+              }
+            },
+            "outcome_branches": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["outcome", "actions"],
+                "properties": {
+                  "outcome": { "type": "string", "enum": ["positive_signal", "needs_approval", "stalled_or_pushback"] },
+                  "actions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": ["day_offset", "action"],
+                      "properties": {
+                        "day_offset": { "type": "integer", "minimum": 0, "maximum": 30 },
+                        "action": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "talking_points": {
           "type": "array",
           "minItems": 1,
@@ -393,7 +451,7 @@
             "type": "object",
             "required": ["day_offset", "action"],
             "properties": {
-              "day_offset": { "type": "integer", "minimum": 0 },
+              "day_offset": { "type": "integer", "minimum": 0, "maximum": 30 },
               "action": { "type": "string" }
             }
           }
