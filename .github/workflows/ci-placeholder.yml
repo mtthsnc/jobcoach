@@ -34,6 +34,9 @@ jobs:
       - name: Show trajectory quality benchmark report
         run: cat .tmp/trajectory-quality-benchmark-report.json
 
+      - name: Show negotiation quality benchmark report
+        run: cat .tmp/negotiation-quality-benchmark-report.json
+
       - name: Run deterministic migration targets
         run: make migrate-up migrate-down
 
