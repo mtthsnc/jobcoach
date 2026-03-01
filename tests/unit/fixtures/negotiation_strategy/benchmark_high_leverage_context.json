@@ -1,0 +1,79 @@
+{
+  "case_id": "high_leverage_context",
+  "target_role": "Senior Backend Engineer",
+  "compensation_targets": {
+    "currency": "USD",
+    "current_base_salary": 175000,
+    "target_base_salary": 190000,
+    "anchor_base_salary": 205000,
+    "walk_away_base_salary": 178000,
+    "recommended_counter_base_salary": 195000,
+    "market_reference_base_salary": 202000,
+    "confidence": 0.82
+  },
+  "leverage_signals": [
+    {
+      "signal": "skill_depth",
+      "strength": "high",
+      "score": 84.0,
+      "evidence": "Top role-relevant skills show sustained delivery impact."
+    },
+    {
+      "signal": "trajectory_readiness",
+      "strength": "high",
+      "score": 79.0,
+      "evidence": "Trajectory readiness indicates strong level alignment."
+    },
+    {
+      "signal": "recent_momentum",
+      "strength": "medium",
+      "score": 66.0,
+      "evidence": "Recent interview trend improved over the last month."
+    }
+  ],
+  "risk_signals": [
+    {
+      "signal": "compensation_compression",
+      "severity": "high",
+      "score": 68.0,
+      "evidence": "Budget range may tighten near top-of-band requests."
+    },
+    {
+      "signal": "deadline_pressure",
+      "severity": "medium",
+      "score": 46.0,
+      "evidence": "Offer deadline leaves moderate follow-up runway."
+    },
+    {
+      "signal": "trajectory_gap",
+      "severity": "low",
+      "score": 24.0,
+      "evidence": "Readiness gap is small for the target role."
+    }
+  ],
+  "evidence_links": [
+    {
+      "source_type": "offer_input",
+      "source_id": "cand_high_001",
+      "detail": "Offer context with current/target salary spread."
+    },
+    {
+      "source_type": "trajectory_plan",
+      "source_id": "tp_high_001",
+      "detail": "Latest readiness plan supports scope expansion."
+    }
+  ],
+  "expectations": {
+    "anchor_band": {
+      "floor_base_salary": 178000,
+      "target_base_salary": 195000,
+      "ceiling_base_salary": 205000
+    },
+    "concession_steps": 3,
+    "objection_signal_order": [
+      "compensation_compression",
+      "deadline_pressure",
+      "trajectory_gap"
+    ]
+  }
+}

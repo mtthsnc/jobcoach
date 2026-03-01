@@ -1,0 +1,73 @@
+{
+  "case_id": "deadline_risk_context",
+  "target_role": "Associate Engineer",
+  "compensation_targets": {
+    "currency": "USD",
+    "current_base_salary": 118000,
+    "target_base_salary": 132000,
+    "anchor_base_salary": 140000,
+    "walk_away_base_salary": 124000,
+    "recommended_counter_base_salary": 133000,
+    "market_reference_base_salary": 136000,
+    "confidence": 0.61
+  },
+  "leverage_signals": [
+    {
+      "signal": "trajectory_readiness",
+      "strength": "medium",
+      "score": 63.0,
+      "evidence": "Readiness trend supports role transition confidence."
+    },
+    {
+      "signal": "skill_depth",
+      "strength": "medium",
+      "score": 61.0,
+      "evidence": "Core technical depth supports baseline leverage."
+    }
+  ],
+  "risk_signals": [
+    {
+      "signal": "deadline_pressure",
+      "severity": "critical",
+      "score": 86.0,
+      "evidence": "Offer deadline is near and compresses negotiation time."
+    },
+    {
+      "signal": "momentum_volatility",
+      "severity": "high",
+      "score": 62.0,
+      "evidence": "Limited recent history introduces performance uncertainty."
+    },
+    {
+      "signal": "compensation_compression",
+      "severity": "medium",
+      "score": 40.0,
+      "evidence": "Lower spread may constrain top-of-band movement."
+    }
+  ],
+  "evidence_links": [
+    {
+      "source_type": "offer_input",
+      "source_id": "cand_deadline_001",
+      "detail": "Offer context includes tight response timeline."
+    },
+    {
+      "source_type": "candidate_profile",
+      "source_id": "cand_deadline_001",
+      "detail": "Candidate strengths indicate reliable execution fundamentals."
+    }
+  ],
+  "expectations": {
+    "anchor_band": {
+      "floor_base_salary": 124000,
+      "target_base_salary": 133000,
+      "ceiling_base_salary": 140000
+    },
+    "concession_steps": 3,
+    "objection_signal_order": [
+      "deadline_pressure",
+      "momentum_volatility",
+      "compensation_compression"
+    ]
+  }
+}
