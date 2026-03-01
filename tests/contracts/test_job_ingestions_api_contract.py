@@ -1154,10 +1154,24 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual([entry.get("step") for entry in concession_ladder], list(range(1, len(concession_ladder) + 1)))
         self.assertIsInstance(data.get("objection_playbook"), list)
         self.assertGreaterEqual(len(data.get("objection_playbook", [])), 1)
+        follow_up_plan = data.get("follow_up_plan")
+        self.assertIsInstance(follow_up_plan, dict)
+        assert isinstance(follow_up_plan, dict)
+        self.assertIsInstance(follow_up_plan.get("thank_you_note"), dict)
+        self.assertIsInstance(follow_up_plan.get("recruiter_cadence"), list)
+        self.assertGreaterEqual(len(follow_up_plan.get("recruiter_cadence", [])), 1)
+        self.assertIsInstance(follow_up_plan.get("outcome_branches"), list)
+        self.assertGreaterEqual(len(follow_up_plan.get("outcome_branches", [])), 1)
         self.assertIsInstance(data.get("talking_points"), list)
         self.assertGreaterEqual(len(data.get("talking_points", [])), 1)
         self.assertIsInstance(data.get("follow_up_actions"), list)
         self.assertGreaterEqual(len(data.get("follow_up_actions", [])), 1)
+        follow_up_actions = data.get("follow_up_actions", [])
+        assert isinstance(follow_up_actions, list)
+        day_offsets = [int(item.get("day_offset", -1)) for item in follow_up_actions if isinstance(item, dict)]
+        self.assertEqual(day_offsets, sorted(day_offsets))
+        self.assertGreaterEqual(min(day_offsets), 0)
+        self.assertLessEqual(max(day_offsets), 30)
 
         get_status, get_body = _request_json(
             self.base_url,
@@ -1175,6 +1189,8 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(get_body.get("data", {}).get("anchor_band"), data.get("anchor_band"))
         self.assertEqual(get_body.get("data", {}).get("concession_ladder"), data.get("concession_ladder"))
         self.assertEqual(get_body.get("data", {}).get("objection_playbook"), data.get("objection_playbook"))
+        self.assertEqual(get_body.get("data", {}).get("follow_up_plan"), data.get("follow_up_plan"))
+        self.assertEqual(get_body.get("data", {}).get("follow_up_actions"), data.get("follow_up_actions"))
 
         self._assert_negotiation_plan_row_persisted(
             negotiation_plan_id=negotiation_plan_id,
@@ -1279,6 +1295,8 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(second_plan.get("anchor_band"), first_plan.get("anchor_band"))
         self.assertEqual(second_plan.get("concession_ladder"), first_plan.get("concession_ladder"))
         self.assertEqual(second_plan.get("objection_playbook"), first_plan.get("objection_playbook"))
+        self.assertEqual(second_plan.get("follow_up_plan"), first_plan.get("follow_up_plan"))
+        self.assertEqual(second_plan.get("follow_up_actions"), first_plan.get("follow_up_actions"))
 
     def test_negotiation_plan_validation_and_not_found_contract(self) -> None:
         candidate_id = self._create_candidate_entity_for_interview()
@@ -2420,6 +2438,14 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual([item.get("step") for item in concession_ladder], list(range(1, len(concession_ladder) + 1)))
         self.assertIsInstance(payload.get("objection_playbook"), list)
         self.assertGreaterEqual(len(payload.get("objection_playbook", [])), 1)
+        follow_up_plan = payload.get("follow_up_plan")
+        self.assertIsInstance(follow_up_plan, dict)
+        assert isinstance(follow_up_plan, dict)
+        self.assertIsInstance(follow_up_plan.get("thank_you_note"), dict)
+        self.assertIsInstance(follow_up_plan.get("recruiter_cadence"), list)
+        self.assertGreaterEqual(len(follow_up_plan.get("recruiter_cadence", [])), 1)
+        self.assertIsInstance(follow_up_plan.get("outcome_branches"), list)
+        self.assertGreaterEqual(len(follow_up_plan.get("outcome_branches", [])), 1)
         self.assertIsInstance(payload.get("talking_points"), list)
         self.assertIsInstance(payload.get("leverage_signals"), list)
         self.assertIsInstance(payload.get("risk_signals"), list)

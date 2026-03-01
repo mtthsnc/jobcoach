@@ -1261,10 +1261,24 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertEqual([item.get("step") for item in concession_ladder], list(range(1, len(concession_ladder) + 1)))
         self.assertIsInstance(plan.get("objection_playbook"), list)
         self.assertGreaterEqual(len(plan.get("objection_playbook", [])), 1)
+        follow_up_plan = plan.get("follow_up_plan")
+        self.assertIsInstance(follow_up_plan, dict)
+        assert isinstance(follow_up_plan, dict)
+        self.assertIsInstance(follow_up_plan.get("thank_you_note"), dict)
+        self.assertIsInstance(follow_up_plan.get("recruiter_cadence"), list)
+        self.assertGreaterEqual(len(follow_up_plan.get("recruiter_cadence", [])), 1)
+        self.assertIsInstance(follow_up_plan.get("outcome_branches"), list)
+        self.assertGreaterEqual(len(follow_up_plan.get("outcome_branches", [])), 1)
         self.assertIsInstance(plan.get("talking_points"), list)
         self.assertGreaterEqual(len(plan.get("talking_points", [])), 1)
         self.assertIsInstance(plan.get("follow_up_actions"), list)
         self.assertGreaterEqual(len(plan.get("follow_up_actions", [])), 1)
+        follow_up_actions = plan.get("follow_up_actions", [])
+        assert isinstance(follow_up_actions, list)
+        day_offsets = [int(item.get("day_offset", -1)) for item in follow_up_actions if isinstance(item, dict)]
+        self.assertEqual(day_offsets, sorted(day_offsets))
+        self.assertGreaterEqual(min(day_offsets), 0)
+        self.assertLessEqual(max(day_offsets), 30)
 
         validation = self.validator.validate("NegotiationPlan", plan)
         self.assertTrue(validation.is_valid, f"NegotiationPlan validation failed: {validation.issues}")
@@ -1308,6 +1322,7 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertEqual(get_body["data"].get("anchor_band"), plan.get("anchor_band"))
         self.assertEqual(get_body["data"].get("concession_ladder"), plan.get("concession_ladder"))
         self.assertEqual(get_body["data"].get("objection_playbook"), plan.get("objection_playbook"))
+        self.assertEqual(get_body["data"].get("follow_up_plan"), plan.get("follow_up_plan"))
 
     def test_negotiation_plan_context_is_deterministic_for_fixed_history(self) -> None:
         _, job_spec_id = self._create_job_spec()
@@ -1394,6 +1409,8 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertEqual(second_plan.get("anchor_band"), first_plan.get("anchor_band"))
         self.assertEqual(second_plan.get("concession_ladder"), first_plan.get("concession_ladder"))
         self.assertEqual(second_plan.get("objection_playbook"), first_plan.get("objection_playbook"))
+        self.assertEqual(second_plan.get("follow_up_plan"), first_plan.get("follow_up_plan"))
+        self.assertEqual(second_plan.get("follow_up_actions"), first_plan.get("follow_up_actions"))
 
         compensation_targets = first_plan.get("compensation_targets", {})
         self.assertIsInstance(compensation_targets, dict)
