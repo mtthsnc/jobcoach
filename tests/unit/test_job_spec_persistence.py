@@ -125,6 +125,18 @@ def _request(
     return status_code, response_headers, payload
 
 
+def _extract_request_log_event(captured_lines: list[str]) -> dict[str, Any]:
+    if not captured_lines:
+        raise AssertionError("Expected at least one captured log line")
+    raw_line = captured_lines[-1]
+    parts = raw_line.split(":", 2)
+    log_message = parts[2] if len(parts) == 3 else raw_line
+    parsed = json.loads(log_message)
+    if not isinstance(parsed, dict):
+        raise AssertionError(f"Structured log must decode to object: {raw_line}")
+    return parsed
+
+
 class JobSpecPersistenceTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -384,6 +396,115 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertEqual(status, 202, body)
         self.assertEqual(body.get("error"), None)
         self.assertEqual(body.get("data", {}).get("status"), "queued")
+
+    def test_structured_request_log_includes_method_route_status_latency_and_request_id(self) -> None:
+        with self.assertLogs("jobcoach.api_gateway.request", level="INFO") as captured_logs:
+            status, _, body = _request(
+                self.app,
+                method="GET",
+                path="/health",
+                headers={"X-Request-Id": "req-log-health-001"},
+                add_default_auth=False,
+            )
+
+        self.assertEqual(status, 200, body)
+        event = _extract_request_log_event(captured_logs.output)
+        self.assertEqual(event.get("event"), "http_request")
+        self.assertEqual(event.get("method"), "GET")
+        self.assertEqual(event.get("path"), "/health")
+        self.assertEqual(event.get("route"), "/health")
+        self.assertEqual(event.get("status"), 200)
+        self.assertEqual(event.get("request_id"), "req-log-health-001")
+        self.assertIn("latency_ms", event)
+        self.assertGreaterEqual(float(event.get("latency_ms", -1)), 0.0)
+        self.assertEqual(event.get("request_id"), body.get("meta", {}).get("request_id"))
+
+    def test_structured_request_log_redacts_candidate_sensitive_fields(self) -> None:
+        cv_text = "Private CV text should never appear in logs."
+        story_note = "Private story note should also never appear in logs."
+        with self.assertLogs("jobcoach.api_gateway.request", level="INFO") as captured_logs:
+            status, _, body = _request(
+                self.app,
+                method="POST",
+                path="/v1/candidate-ingestions",
+                body={
+                    "candidate_id": "cand_log_redaction_001",
+                    "cv_text": cv_text,
+                    "story_notes": [story_note],
+                    "target_roles": ["Staff Backend Engineer"],
+                },
+                headers={
+                    "Idempotency-Key": "log-redaction-candidate-001",
+                    "X-Request-Id": "req-log-redaction-candidate-001",
+                },
+            )
+
+        self.assertEqual(status, 202, body)
+        event = _extract_request_log_event(captured_logs.output)
+        request_summary = event.get("request", {})
+        self.assertIsInstance(request_summary, dict)
+        assert isinstance(request_summary, dict)
+        self.assertEqual(request_summary.get("candidate_id"), "cand_log_redaction_001")
+        cv_summary = request_summary.get("cv_text")
+        self.assertIsInstance(cv_summary, dict)
+        assert isinstance(cv_summary, dict)
+        self.assertTrue(cv_summary.get("redacted"))
+        self.assertEqual(cv_summary.get("reason"), "sensitive_field")
+        notes_summary = request_summary.get("story_notes")
+        self.assertIsInstance(notes_summary, dict)
+        assert isinstance(notes_summary, dict)
+        self.assertTrue(notes_summary.get("redacted"))
+        self.assertEqual(notes_summary.get("count"), 1)
+
+        event_blob = json.dumps(event, ensure_ascii=False)
+        self.assertNotIn(cv_text, event_blob)
+        self.assertNotIn(story_note, event_blob)
+
+    def test_structured_request_log_redacts_text_source_value_and_tracks_auth_failures(self) -> None:
+        source_text = "Confidential source text should never appear in logs."
+        with self.assertLogs("jobcoach.api_gateway.request", level="INFO") as success_logs:
+            success_status, _, success_body = _request(
+                self.app,
+                method="POST",
+                path="/v1/job-ingestions",
+                body={
+                    "source_type": "text",
+                    "source_value": source_text,
+                },
+                headers={
+                    "Idempotency-Key": "log-redaction-source-001",
+                    "X-Request-Id": "req-log-source-001",
+                },
+            )
+
+        self.assertEqual(success_status, 202, success_body)
+        success_event = _extract_request_log_event(success_logs.output)
+        success_request_summary = success_event.get("request", {})
+        self.assertIsInstance(success_request_summary, dict)
+        assert isinstance(success_request_summary, dict)
+        source_summary = success_request_summary.get("source_value")
+        self.assertIsInstance(source_summary, dict)
+        assert isinstance(source_summary, dict)
+        self.assertTrue(source_summary.get("redacted"))
+        self.assertEqual(source_summary.get("reason"), "free_text_source")
+        self.assertNotIn(source_text, json.dumps(success_event, ensure_ascii=False))
+        self.assertEqual(success_event.get("request_id"), success_body.get("meta", {}).get("request_id"))
+
+        with self.assertLogs("jobcoach.api_gateway.request", level="INFO") as unauthorized_logs:
+            unauthorized_status, _, unauthorized_body = _request(
+                self.app,
+                method="POST",
+                path="/v1/job-ingestions",
+                body={"source_type": "text", "source_value": "Auth failure log path"},
+                headers={"Idempotency-Key": "log-auth-failure-001"},
+                add_default_auth=False,
+            )
+
+        self.assertEqual(unauthorized_status, 401, unauthorized_body)
+        unauthorized_event = _extract_request_log_event(unauthorized_logs.output)
+        self.assertEqual(unauthorized_event.get("status"), 401)
+        self.assertEqual(unauthorized_event.get("auth_failure_reason"), "missing_bearer_token")
+        self.assertEqual(unauthorized_event.get("request_id"), unauthorized_body.get("meta", {}).get("request_id"))
 
     def test_taxonomy_normalize_endpoint_returns_deterministic_mapped_and_unmapped_terms(self) -> None:
         status, _, body = _request(

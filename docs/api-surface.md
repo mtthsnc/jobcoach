@@ -7,6 +7,11 @@ Auth guardrails:
 - `/health` remains unauthenticated for readiness/liveness probing.
 - Local-dev bypass is controlled explicitly via `JOBCOACH_AUTH_BYPASS=true`.
 
+Request observability guardrails:
+- Gateway emits structured JSON request logs with `method`, `path`, `route`, `status`, `request_id`, `latency_ms`, and `request_body_bytes`.
+- `request_id` propagates from inbound `x-request-id` when supplied and is linked to response envelope `meta.request_id`.
+- High-risk free-text fields are redacted in log metadata (`cv_text`, `story_notes`, and free-text `source_value` payloads).
+
 ## Implemented Endpoints (API Gateway)
 
 - `POST /job-ingestions`

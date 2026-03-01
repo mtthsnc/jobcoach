@@ -319,3 +319,16 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Require bearer-format only (no token-value validation) and defer token validation to downstream services.
   - Leave auth disabled by default in local runtime and enable only in selected environments, risking drift from production guardrails.
+
+- Decision ID: `DEC-026`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: `M8-002` required structured request observability with deterministic request-id linkage while preventing sensitive payload leakage from candidate/job ingestion flows.
+- Decision: Add gateway request logging at the `JobIngestionAPI` entry point that emits JSON-structured request events (`method`, `path`, `route`, `status`, `request_id`, `latency_ms`, `request_body_bytes`) and includes bounded request metadata with explicit redaction rules for high-risk free-text fields (`cv_text`, `story_notes`, and `source_value` when `source_type=text` or large).
+- Consequences:
+  - Auth failures and successful requests now share a common structured log envelope, with auth failures annotated by deterministic `auth_failure_reason`.
+  - Request IDs from `x-request-id` remain linked across response envelope metadata and logs without changing existing external contracts.
+  - Operational logs avoid raw candidate/job free-text leakage while preserving enough metadata for tracing and debugging.
+- Alternatives considered:
+  - Emit ad hoc plaintext logs per route/handler without a shared structure.
+  - Skip request payload metadata entirely, reducing leakage risk but removing redaction-policy observability coverage.

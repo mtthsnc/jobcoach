@@ -2375,3 +2375,49 @@ Use UTC timestamps. Append entries only.
   - In this sandbox, contract tests require elevated execution due local API socket bind restrictions.
 - Next pointer:
   - Execute `M8-002` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T21:13:30Z
+- Execute `M8-002` structured request logging, request-id propagation, and sensitive-field redaction hardening.
+- Task IDs: M8-002
+- Changes made:
+  - Started implementation of gateway request-level structured logging and redaction policy enforcement with deterministic request-id linkage.
+- Validation evidence:
+  - Planned: targeted unit/contract checks for logging/auth behavior, then full `make test`, `make validate-openapi`, migrate up/down checks, and `make contract-test`.
+- Blockers / risks:
+  - Contract tests expected to require elevated execution in this sandbox due local API bind restrictions.
+- Next pointer:
+  - Complete `M8-002` implementation/tests and advance pointer to `M8-003`.
+
+- END
+- 2026-03-01T21:25:57Z
+- Execute `M8-002` structured request logging, request-id propagation, and sensitive-field redaction hardening.
+- Task IDs: M8-002
+- Changes made:
+  - Implemented structured gateway request logging in `apps/api-gateway/api_gateway/app.py`:
+    - wrapped request dispatch to emit JSON log events with deterministic `method/path/route/status/request_id/latency_ms/request_body_bytes`,
+    - preserved inbound `x-request-id` propagation and linkage with response envelope metadata,
+    - added request payload summarization with bounded metadata and explicit redaction for high-risk fields (`cv_text`, `story_notes`, free-text `source_value`),
+    - added deterministic `auth_failure_reason` logging for bearer auth failure paths.
+  - Extended unit coverage in `tests/unit/test_job_spec_persistence.py`:
+    - new assertions for structured log field presence (`method`, `route`, `status`, `latency_ms`, `request_id`),
+    - new redaction coverage tests for candidate ingestion and text-source job ingestion payloads,
+    - auth failure log coverage for missing bearer token path.
+  - Updated continuity/docs:
+    - `docs/tasklist.md`: marked `M8-002` as `DONE`; advanced NEXT queue to `M8-003` then `M8-004`.
+    - `docs/NEXT_ACTION.md`: advanced active pointer to `M8-003`.
+    - `docs/decision-log.md`: added `DEC-026` for structured logging/redaction policy design.
+    - `docs/api-surface.md`: documented structured request logging + redaction surface.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_structured_request_log_includes_method_route_status_latency_and_request_id tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_structured_request_log_redacts_candidate_sensitive_fields tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_structured_request_log_redacts_text_source_value_and_tracks_auth_failures`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_health_endpoint_is_public_without_authorization tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_v1_endpoint_missing_bearer_token_returns_401 tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_v1_endpoint_malformed_bearer_token_returns_401 tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_v1_endpoint_invalid_bearer_token_returns_401 tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_local_dev_auth_bypass_allows_v1_without_authorization`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 JOBCOACH_API_CMD='python3 apps/api-gateway/serve.py' PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_health_endpoint_is_public_without_authorization tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_v1_endpoint_missing_bearer_token_returns_contract_401 tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_v1_endpoint_malformed_bearer_token_returns_contract_401 tests.contracts.test_job_ingestions_api_contract.JobIngestionApiContractTest.test_v1_endpoint_invalid_bearer_token_returns_contract_401` (initial sandbox bind failure; pass on elevated rerun)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 make test` (pass)
+  - `make validate-openapi` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m8-002-migrate-up.sqlite3 make migrate-up` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m8-002-migrate-down.sqlite3 make migrate-down` (pass)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test` (initial sandbox bind failure; pass on elevated rerun)
+- Blockers / risks:
+  - In this sandbox, contract tests require elevated execution due local API socket bind restrictions.
+- Next pointer:
+  - Execute `M8-003` from `docs/NEXT_ACTION.md`.

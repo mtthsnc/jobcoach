@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import hmac
 import importlib.util
+import io
 import json
+import logging
 import os
 import re
 import sys
+import time
 import unicodedata
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -60,6 +63,11 @@ TAXONOMY_VERSION = "m1-taxonomy-v1"
 DEFAULT_BEARER_TOKEN = "local-dev-token"
 AUTH_BYPASS_ENV_VAR = "JOBCOACH_AUTH_BYPASS"
 AUTH_BEARER_TOKEN_ENV_VAR = "JOBCOACH_API_BEARER_TOKEN"
+REQUEST_LOGGER = logging.getLogger("jobcoach.api_gateway.request")
+SENSITIVE_LOG_TEXT_FIELDS = {"cv_text"}
+SENSITIVE_LOG_LIST_FIELDS = {"story_notes"}
+LOG_TEXT_REDACTION_THRESHOLD = 256
+LOG_TEXT_PREVIEW_LIMIT = 120
 IMMUTABLE_JOB_SPEC_PATCH_FIELDS = {"job_spec_id", "source", "version"}
 MUTABLE_JOB_SPEC_PATCH_FIELDS = {
     "company",
@@ -176,6 +184,50 @@ class JobIngestionAPI:
         method = str(environ.get("REQUEST_METHOD", "")).upper()
         path = str(environ.get("PATH_INFO", ""))
         request_id = _request_id(environ)
+        request_body = _capture_request_body_for_logging(environ=environ, method=method)
+        request_payload_summary = _summarize_request_payload_for_logging(request_body)
+        request_body_size = len(request_body) if request_body is not None else 0
+        started_at = time.perf_counter()
+        status_code = HTTPStatus.INTERNAL_SERVER_ERROR.value
+        environ.pop("jobcoach.auth_failure_reason", None)
+
+        raw_start_response = start_response
+
+        def _logging_start_response(status: str, response_headers: list[tuple[str, str]]) -> Any:
+            nonlocal status_code
+            status_code = _status_code_from_start_line(status)
+            return raw_start_response(status, response_headers)
+
+        try:
+            return self._dispatch_request(
+                environ=environ,
+                start_response=_logging_start_response,
+                method=method,
+                path=path,
+                request_id=request_id,
+            )
+        finally:
+            latency_ms = round((time.perf_counter() - started_at) * 1000.0, 3)
+            self._emit_request_log(
+                method=method,
+                path=path,
+                status_code=status_code,
+                request_id=request_id,
+                latency_ms=latency_ms,
+                request_body_size=request_body_size,
+                request_payload_summary=request_payload_summary,
+                auth_failure_reason=environ.get("jobcoach.auth_failure_reason"),
+            )
+
+    def _dispatch_request(
+        self,
+        *,
+        environ: dict[str, Any],
+        start_response: Any,
+        method: str,
+        path: str,
+        request_id: str,
+    ) -> list[bytes]:
 
         if path == "/health":
             if method != "GET":
@@ -570,6 +622,34 @@ class JobIngestionAPI:
             _error_envelope(request_id=request_id, code="not_found", message="Resource not found", retryable=False),
         )
 
+    def _emit_request_log(
+        self,
+        *,
+        method: str,
+        path: str,
+        status_code: int,
+        request_id: str,
+        latency_ms: float,
+        request_body_size: int,
+        request_payload_summary: dict[str, Any] | None,
+        auth_failure_reason: Any,
+    ) -> None:
+        event: dict[str, Any] = {
+            "event": "http_request",
+            "method": method,
+            "path": path,
+            "route": _route_pattern_for_path(path),
+            "status": int(status_code),
+            "request_id": request_id,
+            "latency_ms": latency_ms,
+            "request_body_bytes": max(0, int(request_body_size)),
+        }
+        if request_payload_summary is not None:
+            event["request"] = request_payload_summary
+        if isinstance(auth_failure_reason, str) and auth_failure_reason:
+            event["auth_failure_reason"] = auth_failure_reason
+        REQUEST_LOGGER.info(json.dumps(event, separators=(",", ":"), ensure_ascii=False, sort_keys=True))
+
     def _authorize_v1_request(
         self,
         *,
@@ -584,6 +664,7 @@ class JobIngestionAPI:
 
         auth_header = str(environ.get("HTTP_AUTHORIZATION", "")).strip()
         if not auth_header:
+            environ["jobcoach.auth_failure_reason"] = "missing_bearer_token"
             return _error_envelope(
                 request_id=request_id,
                 code="unauthorized",
@@ -594,6 +675,7 @@ class JobIngestionAPI:
 
         prefix, _, raw_token = auth_header.partition(" ")
         if prefix != "Bearer" or not raw_token.strip():
+            environ["jobcoach.auth_failure_reason"] = "malformed_bearer_token"
             return _error_envelope(
                 request_id=request_id,
                 code="unauthorized",
@@ -603,6 +685,7 @@ class JobIngestionAPI:
             )
 
         if not hmac.compare_digest(raw_token.strip(), self._bearer_token):
+            environ["jobcoach.auth_failure_reason"] = "invalid_bearer_token"
             return _error_envelope(
                 request_id=request_id,
                 code="unauthorized",
@@ -5164,6 +5247,175 @@ def _feedback_low_response_candidates(*, session: dict[str, Any], limit: int) ->
 
     candidates.sort(key=lambda item: (float(item["score"]), str(item["question_id"])))
     return candidates[: max(0, int(limit))]
+
+
+def _capture_request_body_for_logging(*, environ: dict[str, Any], method: str) -> bytes | None:
+    if method not in {"POST", "PUT", "PATCH"}:
+        return None
+
+    input_stream = environ.get("wsgi.input")
+    if input_stream is None:
+        return None
+
+    raw_content_length = environ.get("CONTENT_LENGTH")
+    if raw_content_length not in (None, ""):
+        try:
+            content_length = int(raw_content_length)
+        except (TypeError, ValueError):
+            return None
+        if content_length <= 0:
+            body_bytes = b""
+        else:
+            body_bytes = input_stream.read(content_length)
+    else:
+        body_bytes = input_stream.read()
+
+    environ["wsgi.input"] = io.BytesIO(body_bytes)
+    environ["CONTENT_LENGTH"] = str(len(body_bytes))
+    return body_bytes
+
+
+def _summarize_request_payload_for_logging(body_bytes: bytes | None) -> dict[str, Any] | None:
+    if body_bytes is None:
+        return None
+    if not body_bytes:
+        return {}
+
+    try:
+        payload = json.loads(body_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"body": {"type": "non_json", "size_bytes": len(body_bytes)}}
+
+    if not isinstance(payload, dict):
+        return {"body": {"type": "json_non_object", "size_bytes": len(body_bytes)}}
+
+    summary: dict[str, Any] = {}
+    for field_name, raw_value in sorted(payload.items(), key=lambda item: str(item[0])):
+        key = str(field_name)
+        summary[key] = _summarize_payload_field_for_logging(
+            field_name=key,
+            value=raw_value,
+            payload=payload,
+        )
+    return summary
+
+
+def _summarize_payload_field_for_logging(
+    *,
+    field_name: str,
+    value: Any,
+    payload: dict[str, Any],
+) -> Any:
+    if field_name in SENSITIVE_LOG_TEXT_FIELDS and isinstance(value, str):
+        return _redacted_text_metadata(value, reason="sensitive_field")
+    if field_name in SENSITIVE_LOG_LIST_FIELDS and isinstance(value, list):
+        return _redacted_list_metadata(value, reason="sensitive_field")
+    if field_name == "source_value" and isinstance(value, str):
+        source_type = str(payload.get("source_type", "")).strip()
+        if source_type == "text" or len(value) > LOG_TEXT_REDACTION_THRESHOLD:
+            return _redacted_text_metadata(value, reason="free_text_source")
+        return _bounded_log_string(value)
+
+    if isinstance(value, str):
+        if len(value) > LOG_TEXT_REDACTION_THRESHOLD:
+            return _redacted_text_metadata(value, reason="large_free_text")
+        return _bounded_log_string(value)
+    if isinstance(value, list):
+        return {"type": "array", "count": len(value)}
+    if isinstance(value, dict):
+        keys = sorted(str(key) for key in value.keys())
+        return {"type": "object", "key_count": len(keys), "keys": keys[:10]}
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return {"type": type(value).__name__}
+
+
+def _redacted_text_metadata(value: str, *, reason: str) -> dict[str, Any]:
+    return {
+        "redacted": True,
+        "reason": reason,
+        "type": "text",
+        "char_count": len(value),
+    }
+
+
+def _redacted_list_metadata(value: list[Any], *, reason: str) -> dict[str, Any]:
+    char_count = 0
+    for item in value:
+        if isinstance(item, str):
+            char_count += len(item)
+    return {
+        "redacted": True,
+        "reason": reason,
+        "type": "array",
+        "count": len(value),
+        "char_count": char_count,
+    }
+
+
+def _bounded_log_string(value: str) -> str:
+    if len(value) <= LOG_TEXT_PREVIEW_LIMIT:
+        return value
+    return value[:LOG_TEXT_PREVIEW_LIMIT] + "...<truncated>"
+
+
+def _status_code_from_start_line(status: str) -> int:
+    try:
+        return int(str(status).split(" ", 1)[0])
+    except (TypeError, ValueError):
+        return HTTPStatus.INTERNAL_SERVER_ERROR.value
+
+
+def _route_pattern_for_path(path: str) -> str:
+    if path == "/health":
+        return "/health"
+    if path == "/v1/job-ingestions":
+        return "/v1/job-ingestions"
+    if path.startswith("/v1/job-ingestions/"):
+        return "/v1/job-ingestions/{ingestion_id}"
+    if path == "/v1/candidate-ingestions":
+        return "/v1/candidate-ingestions"
+    if path.startswith("/v1/candidate-ingestions/"):
+        return "/v1/candidate-ingestions/{ingestion_id}"
+    if path == TAXONOMY_NORMALIZE_ROUTE:
+        return TAXONOMY_NORMALIZE_ROUTE
+    if path == EVAL_RUN_ROUTE:
+        return EVAL_RUN_ROUTE
+    if path.startswith(EVAL_ROUTE_PREFIX):
+        return "/v1/evals/{eval_run_id}"
+    if path == COMPETENCY_FIT_ROUTE:
+        return COMPETENCY_FIT_ROUTE
+    if path == "/v1/interview-sessions":
+        return "/v1/interview-sessions"
+    if path.startswith(INTERVIEW_ROUTE_PREFIX) and path.endswith(INTERVIEW_RESPONSES_SUFFIX):
+        return "/v1/interview-sessions/{session_id}/responses"
+    if path.startswith(INTERVIEW_ROUTE_PREFIX):
+        return "/v1/interview-sessions/{session_id}"
+    if path == "/v1/feedback-reports":
+        return "/v1/feedback-reports"
+    if path.startswith(FEEDBACK_ROUTE_PREFIX):
+        return "/v1/feedback-reports/{feedback_report_id}"
+    if path == "/v1/negotiation-plans":
+        return "/v1/negotiation-plans"
+    if path.startswith(NEGOTIATION_ROUTE_PREFIX):
+        return "/v1/negotiation-plans/{negotiation_plan_id}"
+    if path == "/v1/trajectory-plans":
+        return "/v1/trajectory-plans"
+    if path.startswith(TRAJECTORY_ROUTE_PREFIX):
+        return "/v1/trajectory-plans/{trajectory_plan_id}"
+    if path.startswith(CANDIDATE_ROUTE_PREFIX) and path.endswith(CANDIDATE_PROFILE_SUFFIX):
+        return "/v1/candidates/{candidate_id}/profile"
+    if path.startswith(CANDIDATE_ROUTE_PREFIX) and path.endswith(CANDIDATE_STORYBANK_SUFFIX):
+        return "/v1/candidates/{candidate_id}/storybank"
+    if path.startswith(CANDIDATE_ROUTE_PREFIX) and path.endswith(CANDIDATE_PROGRESS_DASHBOARD_SUFFIX):
+        return "/v1/candidates/{candidate_id}/progress-dashboard"
+    if path.startswith(JOB_SPEC_ROUTE_PREFIX) and path.endswith(JOB_SPEC_REVIEW_ROUTE_SUFFIX):
+        return "/v1/job-specs/{job_spec_id}/review"
+    if path.startswith(JOB_SPEC_ROUTE_PREFIX):
+        return "/v1/job-specs/{job_spec_id}"
+    if path.startswith("/v1"):
+        return "/v1/*"
+    return path
 
 
 def _utc_timestamp() -> str:
