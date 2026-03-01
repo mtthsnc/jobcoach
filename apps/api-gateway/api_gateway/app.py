@@ -130,6 +130,23 @@ class JobIngestionAPI:
         path = str(environ.get("PATH_INFO", ""))
         request_id = _request_id(environ)
 
+        if path == "/health":
+            if method != "GET":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "GET")],
+                )
+            return _json_response(
+                start_response,
+                HTTPStatus.OK,
+                _success_envelope(
+                    request_id=request_id,
+                    data={"status": "ok"},
+                ),
+            )
+
         if path == "/v1/job-ingestions":
             if method != "POST":
                 return _json_response(

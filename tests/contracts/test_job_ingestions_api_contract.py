@@ -120,7 +120,7 @@ class _LocalApiProcess:
 
     def _wait_until_ready(self) -> None:
         deadline = time.monotonic() + READINESS_TIMEOUT_SECONDS
-        probe_path = f"{API_PREFIX}/job-ingestions/contract-readiness-probe"
+        probe_path = "/health"
         probe_url = f"{self._base_url}{probe_path}"
         while time.monotonic() < deadline:
             if self._process is None:
