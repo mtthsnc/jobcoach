@@ -9,8 +9,45 @@
     "current_base_salary": 150000,
     "target_base_salary": 180000,
     "anchor_base_salary": 190000,
-    "walk_away_base_salary": 165000
+    "walk_away_base_salary": 165000,
+    "recommended_counter_base_salary": 185000,
+    "market_reference_base_salary": 189500,
+    "confidence": 0.81
   },
+  "leverage_signals": [
+    {
+      "signal": "trajectory_readiness",
+      "strength": "high",
+      "score": 79.0,
+      "evidence": "Latest trajectory signal indicates strong readiness."
+    },
+    {
+      "signal": "skill_depth",
+      "strength": "medium",
+      "score": 68.0,
+      "evidence": "Top role-relevant skills support compensation positioning."
+    }
+  ],
+  "risk_signals": [
+    {
+      "signal": "deadline_pressure",
+      "severity": "medium",
+      "score": 46.0,
+      "evidence": "Offer deadline leaves moderate follow-up window."
+    }
+  ],
+  "evidence_links": [
+    {
+      "source_type": "offer_input",
+      "source_id": "cand-001",
+      "detail": "Offer context with target and current compensation."
+    },
+    {
+      "source_type": "trajectory_plan",
+      "source_id": "tp-001",
+      "detail": "Latest trajectory readiness used in leverage scoring."
+    }
+  ],
   "talking_points": [
     "Highlight measurable impact from last two roles.",
     "Position compensation ask around expanded scope and delivery outcomes."

@@ -26,6 +26,7 @@ INTERVIEW_PLANNER_PATH = ROOT_DIR / "services" / "interview-engine" / "planner.p
 INTERVIEW_FOLLOWUP_PATH = ROOT_DIR / "services" / "interview-engine" / "followup.py"
 PROGRESS_AGGREGATOR_PATH = ROOT_DIR / "services" / "progress-tracking" / "aggregator.py"
 TRAJECTORY_PLANNER_PATH = ROOT_DIR / "services" / "trajectory-planning" / "generator.py"
+NEGOTIATION_CONTEXT_AGGREGATOR_PATH = ROOT_DIR / "services" / "negotiation-planning" / "aggregator.py"
 INTERVIEW_ROUTE_PREFIX = "/v1/interview-sessions/"
 INTERVIEW_RESPONSES_SUFFIX = "/responses"
 FEEDBACK_ROUTE_PREFIX = "/v1/feedback-reports/"
@@ -74,6 +75,10 @@ _INTERVIEW_PLANNER_MODULE = _load_module("interview_question_planner", INTERVIEW
 _INTERVIEW_FOLLOWUP_MODULE = _load_module("interview_followup_selector", INTERVIEW_FOLLOWUP_PATH)
 _PROGRESS_AGGREGATOR_MODULE = _load_module("progress_aggregator", PROGRESS_AGGREGATOR_PATH)
 _TRAJECTORY_PLANNER_MODULE = _load_module("trajectory_planner", TRAJECTORY_PLANNER_PATH)
+_NEGOTIATION_CONTEXT_AGGREGATOR_MODULE = _load_module(
+    "negotiation_context_aggregator",
+    NEGOTIATION_CONTEXT_AGGREGATOR_PATH,
+)
 
 
 class JobIngestionAPI:
@@ -90,6 +95,7 @@ class JobIngestionAPI:
         interview_followup_selector: Any,
         progress_aggregator: Any,
         trajectory_planner: Any,
+        negotiation_context_aggregator: Any,
     ) -> None:
         self._repository = repository
         self._extraction_worker = extraction_worker
@@ -101,6 +107,7 @@ class JobIngestionAPI:
         self._interview_followup_selector = interview_followup_selector
         self._progress_aggregator = progress_aggregator
         self._trajectory_planner = trajectory_planner
+        self._negotiation_context_aggregator = negotiation_context_aggregator
 
     def __call__(self, environ: dict[str, Any], start_response: Any) -> list[bytes]:
         method = str(environ.get("REQUEST_METHOD", "")).upper()
@@ -1223,11 +1230,21 @@ class JobIngestionAPI:
                 ),
             )
 
+        interview_history = self._repository.list_interview_sessions_for_candidate(candidate_id=candidate_id)
+        feedback_history = self._repository.list_feedback_reports_for_candidate(candidate_id=candidate_id)
+        latest_trajectory_plan = self._repository.get_latest_trajectory_plan_for_candidate(
+            candidate_id=candidate_id,
+            target_role=target_role,
+        )
+
         negotiation_plan_payload = self._build_negotiation_plan_payload(
             candidate_id=candidate_id,
             candidate_profile=candidate_profile,
             target_role=target_role,
             request_payload=payload,
+            interview_history=interview_history,
+            feedback_history=feedback_history,
+            latest_trajectory_plan=latest_trajectory_plan,
         )
         validation = self._schema_validator.validate("NegotiationPlan", negotiation_plan_payload)
         if not validation.is_valid:
@@ -1992,6 +2009,9 @@ class JobIngestionAPI:
         candidate_profile: dict[str, Any],
         target_role: str,
         request_payload: dict[str, Any],
+        interview_history: list[dict[str, Any]],
+        feedback_history: list[dict[str, Any]],
+        latest_trajectory_plan: dict[str, Any] | None,
     ) -> dict[str, Any]:
         current_base_salary_raw = request_payload.get("current_base_salary")
         current_base_salary = (
@@ -2026,10 +2046,66 @@ class JobIngestionAPI:
 
         assert current_base_salary is not None
         assert target_base_salary is not None
-        anchor_base_salary = max(target_base_salary, current_base_salary + 10000)
-        walk_away_base_salary = max(current_base_salary, int(round(target_base_salary * 0.92)))
+
+        negotiation_context = self._negotiation_context_aggregator.aggregate(
+            candidate_id=candidate_id,
+            target_role=target_role,
+            request_payload=request_payload,
+            candidate_profile=candidate_profile,
+            interview_sessions=interview_history,
+            feedback_reports=feedback_history,
+            latest_trajectory_plan=latest_trajectory_plan,
+        )
+        compensation_adjustments = (
+            negotiation_context.get("compensation_adjustments")
+            if isinstance(negotiation_context.get("compensation_adjustments"), dict)
+            else {}
+        )
+        market_uplift_pct = _coerce_negotiation_fraction(
+            compensation_adjustments.get("market_uplift_pct"),
+            minimum=-0.10,
+            maximum=0.30,
+            default=0.04,
+        )
+        total_uplift_pct = _coerce_negotiation_fraction(
+            compensation_adjustments.get("total_uplift_pct"),
+            minimum=-0.10,
+            maximum=0.30,
+            default=0.02,
+        )
+        walk_away_floor_pct = _coerce_negotiation_fraction(
+            compensation_adjustments.get("walk_away_floor_pct"),
+            minimum=0.80,
+            maximum=0.99,
+            default=0.90,
+        )
+        confidence = _coerce_negotiation_fraction(
+            compensation_adjustments.get("confidence"),
+            minimum=0.50,
+            maximum=0.99,
+            default=0.60,
+        )
+
+        base_anchor = max(target_base_salary, current_base_salary + 10000)
+        adjusted_anchor = int(round(base_anchor * (1.0 + total_uplift_pct)))
+        anchor_base_salary = _round_compensation_to_500(max(base_anchor, adjusted_anchor))
+
+        walk_away_base_salary = _round_compensation_to_500(
+            max(current_base_salary, int(round(target_base_salary * walk_away_floor_pct)))
+        )
         if walk_away_base_salary > anchor_base_salary:
             walk_away_base_salary = anchor_base_salary
+
+        market_reference_base_salary = _round_compensation_to_500(
+            max(target_base_salary, int(round(target_base_salary * (1.0 + max(0.0, market_uplift_pct)))))
+        )
+        recommended_counter_base_salary = _round_compensation_to_500(
+            max(target_base_salary, int(round((target_base_salary + anchor_base_salary) / 2.0)))
+        )
+        if recommended_counter_base_salary < walk_away_base_salary:
+            recommended_counter_base_salary = walk_away_base_salary
+        if recommended_counter_base_salary > anchor_base_salary:
+            recommended_counter_base_salary = anchor_base_salary
 
         skills = candidate_profile.get("skills")
         strength_labels: list[str] = []
@@ -2051,6 +2127,20 @@ class JobIngestionAPI:
         role_focus = target_role.strip() or "target role"
         lead_strength = strength_labels[0]
         supporting_strengths = ", ".join(strength_labels[:3])
+        leverage_signals = _normalize_negotiation_leverage_signals(negotiation_context.get("leverage_signals"))
+        risk_signals = _normalize_negotiation_risk_signals(negotiation_context.get("risk_signals"))
+        evidence_links = _normalize_negotiation_evidence_links(negotiation_context.get("evidence_links"))
+
+        lead_leverage = (
+            str(leverage_signals[0].get("signal", "")).replace("_", " ")
+            if leverage_signals
+            else "performance momentum"
+        )
+        lead_risk = (
+            str(risk_signals[0].get("signal", "")).replace("_", " ")
+            if risk_signals
+            else "timeline pressure"
+        )
 
         payload: dict[str, Any] = {
             "negotiation_plan_id": f"np_{uuid4().hex}",
@@ -2058,7 +2148,7 @@ class JobIngestionAPI:
             "target_role": target_role,
             "strategy_summary": (
                 f"Lead with evidence-backed {lead_strength} outcomes for {role_focus}, "
-                "anchor in your target band, and trade only for concrete scope/value gains."
+                f"anchor around {lead_leverage}, and pre-handle {lead_risk} before concessions."
             ),
             "compensation_targets": {
                 "currency": compensation_currency,
@@ -2066,11 +2156,17 @@ class JobIngestionAPI:
                 "target_base_salary": target_base_salary,
                 "anchor_base_salary": anchor_base_salary,
                 "walk_away_base_salary": walk_away_base_salary,
+                "recommended_counter_base_salary": recommended_counter_base_salary,
+                "market_reference_base_salary": market_reference_base_salary,
+                "confidence": confidence,
             },
+            "leverage_signals": leverage_signals,
+            "risk_signals": risk_signals,
+            "evidence_links": evidence_links,
             "talking_points": [
                 f"Open with recent wins tied to {supporting_strengths}.",
-                "State target compensation range with scope-impact justification before discussing concessions.",
-                "Trade concessions for explicit commitments (level, scope, review timeline, or sign-on).",
+                f"Anchor near {anchor_base_salary} with market and readiness evidence before discussing concessions.",
+                "Trade concessions only for explicit commitments (level, scope, review timeline, or sign-on).",
             ],
             "follow_up_actions": [
                 {
@@ -2191,6 +2287,7 @@ def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
     interview_followup_selector = _INTERVIEW_FOLLOWUP_MODULE.AdaptiveFollowupSelector()
     progress_aggregator = _PROGRESS_AGGREGATOR_MODULE.LongitudinalProgressAggregator()
     trajectory_planner = _TRAJECTORY_PLANNER_MODULE.DeterministicTrajectoryPlanner()
+    negotiation_context_aggregator = _NEGOTIATION_CONTEXT_AGGREGATOR_MODULE.DeterministicNegotiationContextAggregator()
     return JobIngestionAPI(
         repository=SQLiteJobIngestionRepository(resolved_db_path),
         extraction_worker=extraction_worker,
@@ -2202,6 +2299,7 @@ def create_app(db_path: str | Path | None = None) -> JobIngestionAPI:
         interview_followup_selector=interview_followup_selector,
         progress_aggregator=progress_aggregator,
         trajectory_planner=trajectory_planner,
+        negotiation_context_aggregator=negotiation_context_aggregator,
     )
 
 
@@ -2413,6 +2511,146 @@ def _validate_create_trajectory_plan_payload(payload: dict[str, Any]) -> list[di
         errors.append({"field": "regenerate", "reason": "must be a boolean when provided"})
 
     return errors
+
+
+def _round_compensation_to_500(raw_value: int) -> int:
+    return int(round(float(raw_value) / 500.0) * 500)
+
+
+def _coerce_negotiation_fraction(
+    raw_value: Any,
+    *,
+    minimum: float,
+    maximum: float,
+    default: float,
+) -> float:
+    if not isinstance(raw_value, (int, float)) or isinstance(raw_value, bool):
+        return default
+    return round(max(minimum, min(maximum, float(raw_value))), 4)
+
+
+def _normalize_negotiation_leverage_signals(raw_signals: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_signals, list):
+        return [
+            {
+                "signal": "skill_depth",
+                "strength": "medium",
+                "score": 62.0,
+                "evidence": "Candidate skill profile provides baseline leverage support.",
+            }
+        ]
+
+    normalized: list[dict[str, Any]] = []
+    for raw in raw_signals:
+        if not isinstance(raw, dict):
+            continue
+        signal = str(raw.get("signal", "")).strip()
+        strength = str(raw.get("strength", "")).strip().lower()
+        score = raw.get("score")
+        evidence = str(raw.get("evidence", "")).strip()
+        if not signal or strength not in {"low", "medium", "high"} or not evidence:
+            continue
+        if not isinstance(score, (int, float)) or isinstance(score, bool):
+            continue
+        bounded_score = max(0.0, min(100.0, round(float(score), 2)))
+        normalized.append(
+            {
+                "signal": signal,
+                "strength": strength,
+                "score": bounded_score,
+                "evidence": evidence,
+            }
+        )
+
+    normalized.sort(key=lambda item: (-float(item["score"]), str(item["signal"])))
+    return normalized[:5] if normalized else _normalize_negotiation_leverage_signals(None)
+
+
+def _normalize_negotiation_risk_signals(raw_signals: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_signals, list):
+        return [
+            {
+                "signal": "timeline_risk",
+                "severity": "medium",
+                "score": 45.0,
+                "evidence": "Offer timeline uncertainty requires active risk management.",
+            }
+        ]
+
+    severity_rank = {"critical": 3, "high": 2, "medium": 1, "low": 0}
+    normalized: list[dict[str, Any]] = []
+    for raw in raw_signals:
+        if not isinstance(raw, dict):
+            continue
+        signal = str(raw.get("signal", "")).strip()
+        severity = str(raw.get("severity", "")).strip().lower()
+        score = raw.get("score")
+        evidence = str(raw.get("evidence", "")).strip()
+        if not signal or severity not in severity_rank or not evidence:
+            continue
+        if not isinstance(score, (int, float)) or isinstance(score, bool):
+            continue
+        bounded_score = max(0.0, min(100.0, round(float(score), 2)))
+        normalized.append(
+            {
+                "signal": signal,
+                "severity": severity,
+                "score": bounded_score,
+                "evidence": evidence,
+            }
+        )
+
+    normalized.sort(
+        key=lambda item: (
+            -severity_rank[str(item["severity"])],
+            -float(item["score"]),
+            str(item["signal"]),
+        )
+    )
+    return normalized[:5] if normalized else _normalize_negotiation_risk_signals(None)
+
+
+def _normalize_negotiation_evidence_links(raw_links: Any) -> list[dict[str, str]]:
+    if not isinstance(raw_links, list):
+        return [
+            {
+                "source_type": "offer_input",
+                "source_id": "candidate",
+                "detail": "Fallback offer context used for negotiation evidence.",
+            }
+        ]
+
+    order = {
+        "offer_input": 0,
+        "candidate_profile": 1,
+        "interview_session": 2,
+        "feedback_report": 3,
+        "trajectory_plan": 4,
+    }
+    dedup: dict[tuple[str, str, str], dict[str, str]] = {}
+    for raw in raw_links:
+        if not isinstance(raw, dict):
+            continue
+        source_type = str(raw.get("source_type", "")).strip()
+        source_id = str(raw.get("source_id", "")).strip()
+        detail = str(raw.get("detail", "")).strip()
+        if not source_type or not source_id or not detail:
+            continue
+        dedup[(source_type, source_id, detail)] = {
+            "source_type": source_type,
+            "source_id": source_id,
+            "detail": detail,
+        }
+
+    normalized = sorted(
+        dedup.values(),
+        key=lambda item: (
+            order.get(str(item["source_type"]), 99),
+            str(item["source_id"]),
+            str(item["detail"]),
+        ),
+    )
+    return normalized[:5] if normalized else _normalize_negotiation_evidence_links(None)
 
 
 def _validate_append_interview_response_payload(payload: dict[str, Any]) -> list[dict[str, str]]:

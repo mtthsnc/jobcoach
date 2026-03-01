@@ -1142,6 +1142,17 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertEqual(compensation_targets.get("target_base_salary"), 180000)
         self.assertGreaterEqual(compensation_targets.get("anchor_base_salary", 0), 180000)
         self.assertGreaterEqual(compensation_targets.get("walk_away_base_salary", 0), 155000)
+        self.assertIn("recommended_counter_base_salary", compensation_targets)
+        self.assertIn("market_reference_base_salary", compensation_targets)
+        self.assertIn("confidence", compensation_targets)
+        self.assertGreaterEqual(float(compensation_targets.get("confidence", 0.0)), 0.5)
+        self.assertLessEqual(float(compensation_targets.get("confidence", 0.0)), 1.0)
+        self.assertIsInstance(plan.get("leverage_signals"), list)
+        self.assertGreaterEqual(len(plan.get("leverage_signals", [])), 1)
+        self.assertIsInstance(plan.get("risk_signals"), list)
+        self.assertGreaterEqual(len(plan.get("risk_signals", [])), 1)
+        self.assertIsInstance(plan.get("evidence_links"), list)
+        self.assertGreaterEqual(len(plan.get("evidence_links", [])), 1)
         self.assertIsInstance(plan.get("talking_points"), list)
         self.assertGreaterEqual(len(plan.get("talking_points", [])), 1)
         self.assertIsInstance(plan.get("follow_up_actions"), list)
@@ -1183,6 +1194,102 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertEqual(get_status, 200, get_body)
         self.assertEqual(get_body["data"].get("negotiation_plan_id"), negotiation_plan_id)
         self.assertEqual(get_body["data"].get("compensation_targets"), plan.get("compensation_targets"))
+        self.assertEqual(get_body["data"].get("leverage_signals"), plan.get("leverage_signals"))
+        self.assertEqual(get_body["data"].get("risk_signals"), plan.get("risk_signals"))
+        self.assertEqual(get_body["data"].get("evidence_links"), plan.get("evidence_links"))
+
+    def test_negotiation_plan_context_is_deterministic_for_fixed_history(self) -> None:
+        _, job_spec_id = self._create_job_spec()
+        _, candidate_id = self._create_candidate_profile()
+
+        create_session_status, _, create_session_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/interview-sessions",
+            body={"job_spec_id": job_spec_id, "candidate_id": candidate_id},
+        )
+        self.assertEqual(create_session_status, 201, create_session_body)
+        session_data = create_session_body["data"]
+        session_id = session_data["session_id"]
+        first_question = session_data["questions"][0]
+
+        respond_status, _, respond_body = _request(
+            self.app,
+            method="POST",
+            path=f"/v1/interview-sessions/{session_id}/responses",
+            body={
+                "question_id": first_question["question_id"],
+                "response": "I improved system uptime from 99.3% to 99.95% and reduced incident pages by 40%.",
+            },
+            headers={"Idempotency-Key": "negotiation-context-seed-response-001"},
+        )
+        self.assertEqual(respond_status, 200, respond_body)
+
+        feedback_status, _, feedback_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/feedback-reports",
+            body={"session_id": session_id},
+            headers={"Idempotency-Key": "negotiation-context-seed-feedback-001"},
+        )
+        self.assertEqual(feedback_status, 201, feedback_body)
+
+        trajectory_status, _, trajectory_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/trajectory-plans",
+            body={"candidate_id": candidate_id, "target_role": "Senior Backend Engineer"},
+            headers={"Idempotency-Key": "negotiation-context-seed-trajectory-001"},
+        )
+        self.assertEqual(trajectory_status, 201, trajectory_body)
+
+        first_status, _, first_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Senior Backend Engineer",
+                "current_base_salary": 165000,
+                "target_base_salary": 195000,
+                "offer_deadline_date": "2026-03-20",
+            },
+            headers={"Idempotency-Key": "negotiation-context-deterministic-001"},
+        )
+        self.assertEqual(first_status, 201, first_body)
+        first_plan = first_body["data"]
+
+        second_status, _, second_body = _request(
+            self.app,
+            method="POST",
+            path="/v1/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Senior Backend Engineer",
+                "current_base_salary": 165000,
+                "target_base_salary": 195000,
+                "offer_deadline_date": "2026-03-20",
+            },
+            headers={"Idempotency-Key": "negotiation-context-deterministic-002"},
+        )
+        self.assertEqual(second_status, 201, second_body)
+        second_plan = second_body["data"]
+
+        self.assertNotEqual(second_plan.get("negotiation_plan_id"), first_plan.get("negotiation_plan_id"))
+        self.assertEqual(second_plan.get("compensation_targets"), first_plan.get("compensation_targets"))
+        self.assertEqual(second_plan.get("leverage_signals"), first_plan.get("leverage_signals"))
+        self.assertEqual(second_plan.get("risk_signals"), first_plan.get("risk_signals"))
+        self.assertEqual(second_plan.get("evidence_links"), first_plan.get("evidence_links"))
+
+        compensation_targets = first_plan.get("compensation_targets", {})
+        self.assertIsInstance(compensation_targets, dict)
+        assert isinstance(compensation_targets, dict)
+        self.assertGreaterEqual(compensation_targets.get("anchor_base_salary", 0), compensation_targets.get("target_base_salary", 0))
+        self.assertGreaterEqual(compensation_targets.get("target_base_salary", 0), compensation_targets.get("current_base_salary", 0))
+        self.assertGreaterEqual(compensation_targets.get("recommended_counter_base_salary", 0), compensation_targets.get("walk_away_base_salary", 0))
+        self.assertLessEqual(compensation_targets.get("recommended_counter_base_salary", 0), compensation_targets.get("anchor_base_salary", 0))
+        self.assertGreaterEqual(float(compensation_targets.get("confidence", 0.0)), 0.5)
+        self.assertLessEqual(float(compensation_targets.get("confidence", 0.0)), 1.0)
 
     def test_negotiation_plan_endpoints_validate_request_shape_and_idempotency(self) -> None:
         _, candidate_id = self._create_candidate_profile()

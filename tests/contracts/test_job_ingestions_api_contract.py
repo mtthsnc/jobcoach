@@ -1130,6 +1130,17 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(compensation_targets.get("target_base_salary"), 180000)
         self.assertGreaterEqual(compensation_targets.get("anchor_base_salary", 0), 180000)
         self.assertGreaterEqual(compensation_targets.get("walk_away_base_salary", 0), 150000)
+        self.assertIn("recommended_counter_base_salary", compensation_targets)
+        self.assertIn("market_reference_base_salary", compensation_targets)
+        self.assertIn("confidence", compensation_targets)
+        self.assertGreaterEqual(float(compensation_targets.get("confidence", 0.0)), 0.5)
+        self.assertLessEqual(float(compensation_targets.get("confidence", 0.0)), 1.0)
+        self.assertIsInstance(data.get("leverage_signals"), list)
+        self.assertGreaterEqual(len(data.get("leverage_signals", [])), 1)
+        self.assertIsInstance(data.get("risk_signals"), list)
+        self.assertGreaterEqual(len(data.get("risk_signals", [])), 1)
+        self.assertIsInstance(data.get("evidence_links"), list)
+        self.assertGreaterEqual(len(data.get("evidence_links", [])), 1)
         self.assertIsInstance(data.get("talking_points"), list)
         self.assertGreaterEqual(len(data.get("talking_points", [])), 1)
         self.assertIsInstance(data.get("follow_up_actions"), list)
@@ -1145,6 +1156,9 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(get_body.get("data", {}).get("candidate_id"), candidate_id)
         self.assertEqual(get_body.get("data", {}).get("target_role"), target_role)
         self.assertEqual(get_body.get("data", {}).get("compensation_targets"), data.get("compensation_targets"))
+        self.assertEqual(get_body.get("data", {}).get("leverage_signals"), data.get("leverage_signals"))
+        self.assertEqual(get_body.get("data", {}).get("risk_signals"), data.get("risk_signals"))
+        self.assertEqual(get_body.get("data", {}).get("evidence_links"), data.get("evidence_links"))
 
         self._assert_negotiation_plan_row_persisted(
             negotiation_plan_id=negotiation_plan_id,
@@ -1152,6 +1166,100 @@ class JobIngestionApiContractTest(unittest.TestCase):
             target_role=target_role,
             idempotency_key=idempotency_key,
         )
+
+    def test_negotiation_context_signals_are_deterministic_for_fixed_history_contract(self) -> None:
+        candidate_id = self._create_candidate_entity_for_interview()
+        job_spec_id = self._create_job_spec_entity_for_interview()
+
+        create_session_status, create_session_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions",
+            body={
+                "job_spec_id": job_spec_id,
+                "candidate_id": candidate_id,
+                "mode": "mock_interview",
+            },
+        )
+        self.assertEqual(create_session_status, 201, create_session_body)
+        session_data = create_session_body.get("data", {})
+        session_id = session_data.get("session_id")
+        self.assertIsInstance(session_id, str)
+        self.assertTrue(session_id)
+        assert isinstance(session_id, str)
+
+        questions = session_data.get("questions")
+        self.assertIsInstance(questions, list)
+        self.assertGreaterEqual(len(questions or []), 1)
+        assert isinstance(questions, list)
+        first_question = questions[0]
+        response_status, response_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/interview-sessions/{session_id}/responses",
+            body={
+                "question_id": first_question.get("question_id"),
+                "response": "I improved API uptime to 99.95% and reduced Sev-1 incidents by 40%.",
+            },
+            headers={"Idempotency-Key": f"negotiation-context-response-{uuid.uuid4()}"},
+        )
+        self.assertEqual(response_status, 200, response_body)
+
+        feedback_status, feedback_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/feedback-reports",
+            body={"session_id": session_id},
+            headers={"Idempotency-Key": f"negotiation-context-feedback-{uuid.uuid4()}"},
+        )
+        self.assertEqual(feedback_status, 201, feedback_body)
+
+        trajectory_status, trajectory_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/trajectory-plans",
+            body={"candidate_id": candidate_id, "target_role": "Senior Backend Engineer"},
+            headers={"Idempotency-Key": f"negotiation-context-trajectory-{uuid.uuid4()}"},
+        )
+        self.assertEqual(trajectory_status, 201, trajectory_body)
+
+        first_status, first_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Senior Backend Engineer",
+                "current_base_salary": 165000,
+                "target_base_salary": 195000,
+                "offer_deadline_date": "2026-03-20",
+            },
+            headers={"Idempotency-Key": f"negotiation-context-first-{uuid.uuid4()}"},
+        )
+        self.assertEqual(first_status, 201, first_body)
+        first_plan = first_body.get("data", {})
+
+        second_status, second_body = _request_json(
+            self.base_url,
+            "POST",
+            f"{API_PREFIX}/negotiation-plans",
+            body={
+                "candidate_id": candidate_id,
+                "target_role": "Senior Backend Engineer",
+                "current_base_salary": 165000,
+                "target_base_salary": 195000,
+                "offer_deadline_date": "2026-03-20",
+            },
+            headers={"Idempotency-Key": f"negotiation-context-second-{uuid.uuid4()}"},
+        )
+        self.assertEqual(second_status, 201, second_body)
+        second_plan = second_body.get("data", {})
+
+        self.assertNotEqual(second_plan.get("negotiation_plan_id"), first_plan.get("negotiation_plan_id"))
+        self.assertEqual(second_plan.get("compensation_targets"), first_plan.get("compensation_targets"))
+        self.assertEqual(second_plan.get("leverage_signals"), first_plan.get("leverage_signals"))
+        self.assertEqual(second_plan.get("risk_signals"), first_plan.get("risk_signals"))
+        self.assertEqual(second_plan.get("evidence_links"), first_plan.get("evidence_links"))
 
     def test_negotiation_plan_validation_and_not_found_contract(self) -> None:
         candidate_id = self._create_candidate_entity_for_interview()
@@ -2277,7 +2385,14 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertEqual(payload.get("candidate_id"), candidate_id)
         self.assertEqual(payload.get("target_role"), target_role)
         self.assertIsInstance(payload.get("compensation_targets"), dict)
+        compensation_targets = payload.get("compensation_targets", {})
+        self.assertIn("recommended_counter_base_salary", compensation_targets)
+        self.assertIn("market_reference_base_salary", compensation_targets)
+        self.assertIn("confidence", compensation_targets)
         self.assertIsInstance(payload.get("talking_points"), list)
+        self.assertIsInstance(payload.get("leverage_signals"), list)
+        self.assertIsInstance(payload.get("risk_signals"), list)
+        self.assertIsInstance(payload.get("evidence_links"), list)
         self.assertIsInstance(payload.get("follow_up_actions"), list)
         self.assertGreaterEqual(len(payload.get("follow_up_actions", [])), 1)
 

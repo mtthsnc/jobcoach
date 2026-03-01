@@ -144,3 +144,15 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Delay contract/storage work and begin with free-form negotiation generation logic.
   - Extend `TrajectoryPlan` instead of introducing a dedicated M6 negotiation entity.
+
+- Decision ID: `DEC-012`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: M6-002 required deterministic negotiation context from heterogeneous inputs (offer targets, interview/feedback progression, and trajectory readiness) while keeping API payloads contract-safe.
+- Decision: Introduce a dedicated deterministic negotiation-context aggregator module and expose its output through structured `NegotiationPlan` fields (`compensation_targets` with bounded adjustment metadata, `leverage_signals`, `risk_signals`, `evidence_links`).
+- Consequences:
+  - Negotiation payload generation now has stable, fixture-testable signal math and ordering for identical histories.
+  - Downstream M6 strategy/follow-up generators can consume normalized context primitives instead of re-deriving history signals.
+- Alternatives considered:
+  - Keep negotiation context logic embedded directly in API handlers without a dedicated module.
+  - Keep only free-form talking points without explicit leverage/risk/evidence structures in schema contracts.

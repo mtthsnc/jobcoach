@@ -73,8 +73,8 @@ class SchemaValidationContractTest(unittest.TestCase):
             },
             "NegotiationPlan": {
                 "fixture": "negotiation_plan_negative_day_offset.json",
-                "path": "$.follow_up_actions[0].day_offset",
-                "message": "value must be >= 0",
+                "path": "$.risk_signals[0].severity",
+                "message": "enum",
             },
             "TrajectoryPlan": {
                 "fixture": "trajectory_plan_bad_target_date.json",

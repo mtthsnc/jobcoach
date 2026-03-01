@@ -253,6 +253,9 @@
         "target_role",
         "strategy_summary",
         "compensation_targets",
+        "leverage_signals",
+        "risk_signals",
+        "evidence_links",
         "talking_points",
         "follow_up_actions",
         "generated_at"
@@ -270,14 +273,61 @@
             "current_base_salary",
             "target_base_salary",
             "anchor_base_salary",
-            "walk_away_base_salary"
+            "walk_away_base_salary",
+            "recommended_counter_base_salary",
+            "market_reference_base_salary",
+            "confidence"
           ],
           "properties": {
             "currency": { "type": "string" },
             "current_base_salary": { "type": "integer", "minimum": 0 },
             "target_base_salary": { "type": "integer", "minimum": 0 },
             "anchor_base_salary": { "type": "integer", "minimum": 0 },
-            "walk_away_base_salary": { "type": "integer", "minimum": 0 }
+            "walk_away_base_salary": { "type": "integer", "minimum": 0 },
+            "recommended_counter_base_salary": { "type": "integer", "minimum": 0 },
+            "market_reference_base_salary": { "type": "integer", "minimum": 0 },
+            "confidence": { "type": "number", "minimum": 0.5, "maximum": 1.0 }
+          }
+        },
+        "leverage_signals": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["signal", "strength", "score", "evidence"],
+            "properties": {
+              "signal": { "type": "string" },
+              "strength": { "type": "string", "enum": ["low", "medium", "high"] },
+              "score": { "type": "number", "minimum": 0, "maximum": 100 },
+              "evidence": { "type": "string" }
+            }
+          }
+        },
+        "risk_signals": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["signal", "severity", "score", "evidence"],
+            "properties": {
+              "signal": { "type": "string" },
+              "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+              "score": { "type": "number", "minimum": 0, "maximum": 100 },
+              "evidence": { "type": "string" }
+            }
+          }
+        },
+        "evidence_links": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["source_type", "source_id", "detail"],
+            "properties": {
+              "source_type": { "type": "string" },
+              "source_id": { "type": "string" },
+              "detail": { "type": "string" }
+            }
           }
         },
         "talking_points": {

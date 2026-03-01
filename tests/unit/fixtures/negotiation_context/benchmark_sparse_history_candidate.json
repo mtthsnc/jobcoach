@@ -1,0 +1,51 @@
+{
+  "case_id": "sparse_history_candidate",
+  "candidate_id": "cand_neg_ctx_002",
+  "target_role": "Associate Engineer",
+  "request_payload": {
+    "candidate_id": "cand_neg_ctx_002",
+    "target_role": "Associate Engineer",
+    "current_base_salary": 120000
+  },
+  "candidate_profile": {
+    "candidate_id": "cand_neg_ctx_002",
+    "skills": {
+      "skill.communication": 0.55
+    }
+  },
+  "interview_sessions": [],
+  "feedback_reports": [],
+  "latest_trajectory_plan": null,
+  "expectations": {
+    "history_counts": {
+      "interview_sessions": 0,
+      "feedback_reports": 0,
+      "snapshots": 0,
+      "trajectory_plans": 0
+    },
+    "leverage_signal_order": [
+      "trajectory_readiness",
+      "skill_depth",
+      "recent_momentum"
+    ],
+    "risk_signal_order": [
+      "momentum_volatility",
+      "compensation_compression",
+      "deadline_pressure",
+      "trajectory_gap"
+    ],
+    "evidence_source_order": [
+      "offer_input",
+      "candidate_profile"
+    ],
+    "compensation_adjustments": {
+      "market_uplift_pct": 0.02,
+      "readiness_uplift_pct": 0.0,
+      "momentum_uplift_pct": 0.0,
+      "risk_discount_pct": 0.02,
+      "total_uplift_pct": 0.0,
+      "walk_away_floor_pct": 0.92,
+      "confidence": 0.58
+    }
+  }
+}

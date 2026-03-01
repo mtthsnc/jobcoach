@@ -53,7 +53,7 @@ Status legend: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`
 | M5-006 | DONE | P0 | M5 | Add trajectory quality benchmark + threshold gates for CI/local | M5-005,M0-006 | Benchmark report emitted and CI fails on trend-metric/trajectory-quality regressions |
 | M6-PLAN-001 | DONE | P0 | M6 | Define executable M6 backlog with dependencies and acceptance criteria | M5-006 | M6 task graph is committed and NEXT pointer targets first executable M6 task |
 | M6-001 | DONE | P0 | M6 | Add `NegotiationPlan` orchestration contract endpoints (`POST /negotiation-plans`, `GET /negotiation-plans/{id}`) + storage migration | M6-PLAN-001 | OpenAPI + schema fixtures + SQL migration for negotiation plan persistence pass contract and migration checks |
-| M6-002 | TODO | P0 | M6 | Build deterministic negotiation-context aggregator from offer inputs + interview/feedback/trajectory history | M6-001 | Aggregated compensation targets, leverage factors, and risk signals are deterministic and fixture-tested |
+| M6-002 | DONE | P0 | M6 | Build deterministic negotiation-context aggregator from offer inputs + interview/feedback/trajectory history | M6-001 | Aggregated compensation targets, leverage factors, and risk signals are deterministic and fixture-tested |
 | M6-003 | TODO | P0 | M6 | Implement negotiation strategy generator (anchor band, concession ladder, objection playbook) from context signals | M6-002 | Generated negotiation strategies are schema-valid, evidence-linked, and deterministic on fixed fixtures |
 | M6-004 | TODO | P1 | M6 | Implement post-interview follow-up planner (thank-you draft, recruiter cadence, outcome branches) | M6-003 | Follow-up plans include date-bounded actions, template-safe drafts, and deterministic branch selection |
 | M6-005 | TODO | P1 | M6 | Persist/retrieve negotiation plans with idempotent regeneration + optimistic version checks | M6-001,M6-003,M6-004 | Storage supports replay/conflict/version progression and returns schema-valid versioned negotiation plans |
@@ -61,8 +61,8 @@ Status legend: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`
 
 ## NEXT
 
-- `NEXT-1`: Execute `M6-002` (deterministic negotiation-context aggregation).
-- `NEXT-2`: Execute `M6-003` (negotiation strategy generator).
+- `NEXT-1`: Execute `M6-003` (negotiation strategy generator).
+- `NEXT-2`: Execute `M6-004` (post-interview follow-up planner).
 
 ## Backlog (Future Milestones)
 

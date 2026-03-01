@@ -1624,3 +1624,57 @@ Use UTC timestamps. Append entries only.
   - No blockers encountered.
 - Next pointer:
   - Execute `M6-002` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T00:00:04Z
+- Execute `M6-002` deterministic negotiation-context aggregation.
+- Task IDs: M6-002
+- Changes made:
+  - Started implementation of deterministic negotiation-context aggregation and schema-backed negotiation payload context fields.
+- Validation evidence:
+  - Planned: unit/schema/contract coverage and full make validation gates.
+- Blockers / risks:
+  - None at start.
+- Next pointer:
+  - Complete `M6-002` and advance pointer to `M6-003`.
+
+- END
+- 2026-03-01T00:11:11Z
+- Execute `M6-002` deterministic negotiation-context aggregation.
+- Task IDs: M6-002
+- Changes made:
+  - Added deterministic aggregation module `services/negotiation-planning/aggregator.py` to combine offer inputs, interview/feedback trend snapshots, trajectory readiness signals, and ordered evidence links.
+  - Integrated aggregation into negotiation payload generation in `apps/api-gateway/api_gateway/app.py`:
+    - wired module loading/dependency injection in `create_app`,
+    - fetched interview/feedback/trajectory history on negotiation create,
+    - produced structured `compensation_targets` adjustment metadata plus `leverage_signals`, `risk_signals`, and `evidence_links`.
+  - Extended contracts:
+    - `schemas/openapi/openapi-m0-m2.yaml`: expanded `NegotiationPlan` with required context structures and compensation adjustment fields.
+    - `schemas/jsonschema/core-schemas.json`: mirrored schema additions and bounds for new negotiation context fields.
+  - Added deterministic fixture coverage:
+    - `tests/unit/fixtures/negotiation_context/benchmark_*.json`
+    - `tests/unit/test_negotiation_context_aggregator.py`
+  - Extended unit/contract/schema tests:
+    - `tests/unit/test_job_spec_persistence.py`: deterministic negotiation-context stability and bounded compensation assertions.
+    - `tests/contracts/test_job_ingestions_api_contract.py`: negotiation payload contract assertions + deterministic context reproducibility scenario.
+    - `tests/contracts/test_schema_validation.py` + negotiation fixtures: schema validation for new context field rules.
+  - Updated planning artifacts:
+    - Marked `M6-002` as `DONE` in `docs/tasklist.md`.
+    - Advanced `docs/NEXT_ACTION.md` pointer to `M6-003`.
+    - Added decision `DEC-012` in `docs/decision-log.md`.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_negotiation_context_aggregator.py`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/contracts/test_schema_validation.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_create_and_get_negotiation_plan_persists_schema_valid_row tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_negotiation_plan_context_is_deterministic_for_fixed_history tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_negotiation_plan_endpoints_validate_request_shape_and_idempotency`
+  - `./tools/scripts/validate_openapi.sh schemas/openapi/openapi.yaml`
+  - `MIGRATE_DB_PATH=.tmp/m6-002-local.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh up`
+  - `MIGRATE_DB_PATH=.tmp/m6-002-local.sqlite3 ./tools/scripts/migrate_sqlite_smoke.sh down`
+  - `make validate-openapi`
+  - `MIGRATE_DB_PATH=.tmp/m6-002-make.sqlite3 make migrate-up`
+  - `MIGRATE_DB_PATH=.tmp/m6-002-make-down.sqlite3 make migrate-down`
+  - `PYTHONDONTWRITEBYTECODE=1 make test`
+  - `make contract-test` (fails with two pre-existing contract failures unrelated to M6-002 scope: `test_append_interview_response_contract_with_idempotency`, `test_create_and_get_feedback_report_contract`)
+- Blockers / risks:
+  - Full `make contract-test` currently fails on two non-M6 contract tests in this environment; M6-002-specific contract and schema checks pass.
+- Next pointer:
+  - Execute `M6-003` from `docs/NEXT_ACTION.md`.
