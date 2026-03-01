@@ -1,0 +1,19 @@
+{
+  "case_id": "succeeded_negotiation_quality",
+  "suite": "negotiation_quality_v1",
+  "conflict_suite": "job_extraction_v1",
+  "request_payload": {
+    "suite": "negotiation_quality_v1"
+  },
+  "terminal_status": "succeeded",
+  "terminal_metrics": {
+    "suite": "negotiation_quality_v1",
+    "passed": true,
+    "aggregate": {
+      "overall_negotiation_quality": 0.93
+    },
+    "failed_threshold_count": 0,
+    "failed_threshold_metrics": [],
+    "case_count": 3
+  }
+}

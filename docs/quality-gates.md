@@ -21,6 +21,11 @@ JobCoach enforces deterministic benchmark thresholds in local validation and CI.
 - Feedback quality benchmark:
   - `overall_feedback_quality >= 0.90`
   - plus completeness/root-cause/evidence/rewrite/action-plan checks
+- Eval orchestration benchmark:
+  - `transition_correctness_rate >= 1.00`
+  - `idempotency_correctness_rate >= 1.00`
+  - `lifecycle_event_integrity_rate >= 1.00`
+  - `overall_eval_orchestration_quality >= 1.00`
 
 ## Testing Strategy
 

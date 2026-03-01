@@ -278,3 +278,15 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Emit lifecycle events in API handlers outside repository transactions, risking write/event divergence on partial failures.
   - Use non-deterministic UUID event IDs and deduplicate downstream rather than enforcing deterministic persistence-side idempotency.
+
+- Decision ID: `DEC-023`
+- Date (UTC): `2026-03-01`
+- Status: `accepted`
+- Context: `M7-006` required a deterministic reliability benchmark gate for eval-run orchestration behavior (lifecycle transitions, idempotency replay/conflict semantics, and lifecycle outbox payload integrity) that fails CI/local validation on regressions.
+- Decision: Add a fixture-driven eval-orchestration benchmark runner (`eval_orchestration_benchmark.py`) with strict threshold defaults (`1.0`) for transition correctness, idempotency correctness, lifecycle event integrity, and overall orchestration quality; wire it into `make test`, dedicated Makefile target, and CI report artifact output.
+- Consequences:
+  - Local/CI validation now fails fast when eval-run orchestration persistence/event invariants regress, even if endpoint contract tests still pass.
+  - Fixture corpus maintenance becomes part of intentional orchestration behavior changes for eval-run lifecycle/idempotency semantics.
+- Alternatives considered:
+  - Rely only on repository/API unit+contract tests without a dedicated orchestration reliability benchmark gate.
+  - Add a non-threshold smoke check that emits reports but does not gate `make test`/CI pass-fail outcomes.

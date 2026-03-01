@@ -1,0 +1,19 @@
+{
+  "case_id": "succeeded_interview_relevance",
+  "suite": "interview_relevance_v1",
+  "conflict_suite": "candidate_parse_v1",
+  "request_payload": {
+    "suite": "interview_relevance_v1"
+  },
+  "terminal_status": "succeeded",
+  "terminal_metrics": {
+    "suite": "interview_relevance_v1",
+    "passed": true,
+    "aggregate": {
+      "overall_relevance": 0.96
+    },
+    "failed_threshold_count": 0,
+    "failed_threshold_metrics": [],
+    "case_count": 3
+  }
+}

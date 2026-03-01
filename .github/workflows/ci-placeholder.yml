@@ -37,6 +37,9 @@ jobs:
       - name: Show negotiation quality benchmark report
         run: cat .tmp/negotiation-quality-benchmark-report.json
 
+      - name: Show eval orchestration benchmark report
+        run: cat .tmp/eval-orchestration-benchmark-report.json
+
       - name: Run deterministic migration targets
         run: make migrate-up migrate-down
 

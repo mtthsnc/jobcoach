@@ -2208,3 +2208,53 @@ Use UTC timestamps. Append entries only.
   - In this environment, contract tests require elevated execution to bind the local API process port.
 - Next pointer:
   - Execute `M7-006` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-01T20:22:41Z
+- Execute `M7-006` eval-orchestration quality benchmark + threshold gate.
+- Task IDs: M7-006
+- Changes made:
+  - Started implementation of deterministic eval-orchestration benchmark runner, fixture corpus, and local/CI threshold-gate wiring.
+- Validation evidence:
+  - Planned: benchmark runner/unit validation + full `make test`, `make validate-openapi`, migrate up/down, and `make contract-test`.
+- Blockers / risks:
+  - Contract tests expected to require elevated execution in this sandbox due local API port bind restrictions.
+- Next pointer:
+  - Complete M7-006 implementation/tests and advance pointer to `M7-CLOSE-001`.
+
+- END
+- 2026-03-01T20:32:36Z
+- Execute `M7-006` eval-orchestration quality benchmark + threshold gate.
+- Task IDs: M7-006
+- Changes made:
+  - Added deterministic benchmark runner `services/quality-eval/benchmark/eval_orchestration_benchmark.py` with threshold-gated metrics for:
+    - lifecycle transition correctness (`queued -> running -> terminal`),
+    - idempotency replay/conflict correctness,
+    - lifecycle outbox event integrity (`eval_run.queued` + terminal event payload consistency and retry dedup behavior).
+  - Added fixture corpus `tests/unit/fixtures/eval_orchestration/benchmark_*.json` covering:
+    - succeeded interview relevance run,
+    - succeeded negotiation quality run,
+    - failed trajectory threshold run with persisted error payload checks.
+  - Added benchmark runner unit coverage `tests/unit/test_eval_orchestration_benchmark_runner.py` for baseline pass, strict-threshold failure behavior, and report-field contract checks.
+  - Wired local/CI gates:
+    - `Makefile`: added eval orchestration benchmark variables/target/report path and integrated gate into `make test`.
+    - `.github/workflows/ci-placeholder.yml`: added eval orchestration benchmark report artifact output (`.tmp/eval-orchestration-benchmark-report.json`).
+  - Updated quality-gate docs:
+    - `services/quality-eval/README.md`: added eval orchestration benchmark module/command.
+    - `docs/quality-gates.md`: added M7 eval orchestration threshold defaults.
+  - Updated planning/docs:
+    - `docs/tasklist.md`: marked `M7-006` as `DONE` and advanced NEXT queue to `M7-CLOSE-001` then `M8-PLAN-001`.
+    - `docs/NEXT_ACTION.md`: advanced active pointer to `M7-CLOSE-001`.
+    - `docs/decision-log.md`: added `DEC-023` documenting eval-orchestration benchmark gate decision.
+- Validation evidence:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 services/quality-eval/benchmark/eval_orchestration_benchmark.py --fixtures-dir tests/unit/fixtures/eval_orchestration --report-path .tmp/eval-orchestration-benchmark-report.json`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests/unit/test_eval_orchestration_benchmark_runner.py`
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 make test` (pass)
+  - `make validate-openapi` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m7-006-migrate-up.sqlite3 make migrate-up` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m7-006-migrate-down.sqlite3 make migrate-down` (pass)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test` (initial sandbox bind failure; pass on elevated rerun)
+- Blockers / risks:
+  - In this environment, contract tests require elevated execution to bind the local API process port.
+- Next pointer:
+  - Execute `M7-CLOSE-001` from `docs/NEXT_ACTION.md`.

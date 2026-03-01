@@ -1,1 +1,1 @@
-"""Benchmark tooling for deterministic extraction, candidate parsing, interview relevance, feedback quality, and trajectory quality gates."""
+"""Benchmark tooling for deterministic extraction, parsing, interview, feedback, trajectory, negotiation, and eval-orchestration quality gates."""
