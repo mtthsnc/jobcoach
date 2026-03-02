@@ -10,10 +10,11 @@ import re
 import sys
 import time
 import unicodedata
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, unquote
 from uuid import uuid4
 
@@ -144,6 +145,140 @@ _EVAL_BENCHMARK_MODULES = {
 }
 
 
+def _execute_eval_suite(suite: str) -> tuple[str, dict[str, Any], dict[str, str] | None]:
+    benchmark_module = _EVAL_BENCHMARK_MODULES.get(suite)
+    base_metrics: dict[str, Any] = {
+        "suite": suite,
+        "passed": False,
+        "aggregate": {},
+        "failed_threshold_count": 0,
+        "failed_threshold_metrics": [],
+        "case_count": 0,
+    }
+    if benchmark_module is None:
+        return (
+            "failed",
+            base_metrics,
+            {
+                "code": "unsupported_eval_suite",
+                "message": f"Unsupported eval suite: {suite}",
+            },
+        )
+
+    benchmark_runner = getattr(benchmark_module, "run_benchmark", None)
+    if not callable(benchmark_runner):
+        return (
+            "failed",
+            base_metrics,
+            {
+                "code": "benchmark_runner_unavailable",
+                "message": f"Eval suite runner is unavailable for suite: {suite}",
+            },
+        )
+
+    try:
+        report, passed = benchmark_runner()
+        report_payload = report if isinstance(report, dict) else {}
+        aggregate_payload = report_payload.get("aggregate", {})
+        failed_thresholds = report_payload.get("failed_thresholds")
+        cases_payload = report_payload.get("cases")
+        failed_threshold_metrics = sorted(
+            [
+                str(item.get("metric"))
+                for item in (failed_thresholds if isinstance(failed_thresholds, list) else [])
+                if isinstance(item, dict) and item.get("metric")
+            ]
+        )
+        metrics: dict[str, Any] = {
+            "suite": suite,
+            "passed": bool(passed),
+            "aggregate": aggregate_payload if isinstance(aggregate_payload, dict) else {},
+            "failed_threshold_count": len(failed_threshold_metrics),
+            "failed_threshold_metrics": failed_threshold_metrics,
+            "case_count": len(cases_payload) if isinstance(cases_payload, list) else 0,
+        }
+        if bool(passed):
+            return "succeeded", metrics, None
+        return (
+            "failed",
+            metrics,
+            {
+                "code": "benchmark_threshold_failed",
+                "message": f"Eval suite {suite} failed configured threshold gates",
+            },
+        )
+    except Exception as exc:  # pragma: no cover - defensive path
+        return (
+            "failed",
+            base_metrics,
+            {
+                "code": "eval_execution_error",
+                "message": str(exc),
+            },
+        )
+
+
+@dataclass(frozen=True)
+class EvalRunWorkerRunResult:
+    claimed_count: int
+    terminal_count: int
+    skipped_count: int
+
+
+class EvalRunWorker:
+    def __init__(
+        self,
+        *,
+        repository: SQLiteJobIngestionRepository,
+        suite_executor: Callable[[str], tuple[str, dict[str, Any], dict[str, str] | None]] | None = None,
+    ) -> None:
+        self._repository = repository
+        self._suite_executor = suite_executor or _execute_eval_suite
+
+    def run_once(self, *, limit: int = 100) -> EvalRunWorkerRunResult:
+        normalized_limit = max(0, int(limit))
+        claimed_count = 0
+        terminal_count = 0
+        skipped_count = 0
+
+        for _ in range(normalized_limit):
+            running_payload = self._repository.claim_next_queued_eval_run()
+            if running_payload is None:
+                break
+            claimed_count += 1
+
+            eval_run_id = str(running_payload.get("eval_run_id", "")).strip()
+            suite = str(running_payload.get("suite", "")).strip()
+            if not eval_run_id or not suite:
+                skipped_count += 1
+                continue
+
+            terminal_status, metrics, error_payload = self._suite_executor(suite)
+            error_code = None
+            error_message = None
+            if error_payload is not None:
+                error_code = str(error_payload.get("code", "")).strip() or None
+                error_message = str(error_payload.get("message", "")).strip() or None
+
+            completed_payload = self._repository.complete_eval_run(
+                eval_run_id=eval_run_id,
+                status=terminal_status,
+                metrics=metrics,
+                error_code=error_code,
+                error_message=error_message,
+            )
+            if completed_payload is not None and completed_payload.get("status") in {"succeeded", "failed"}:
+                terminal_count += 1
+            else:
+                skipped_count += 1
+
+        return EvalRunWorkerRunResult(
+            claimed_count=claimed_count,
+            terminal_count=terminal_count,
+            skipped_count=skipped_count,
+        )
+
+
 class JobIngestionAPI:
     def __init__(
         self,
@@ -163,6 +298,7 @@ class JobIngestionAPI:
         negotiation_followup_planner: Any,
         auth_bypass_enabled: bool,
         bearer_token: str,
+        eval_run_worker: EvalRunWorker | None = None,
     ) -> None:
         self._repository = repository
         self._extraction_worker = extraction_worker
@@ -179,6 +315,7 @@ class JobIngestionAPI:
         self._negotiation_followup_planner = negotiation_followup_planner
         self._auth_bypass_enabled = auth_bypass_enabled
         self._bearer_token = bearer_token
+        self._eval_run_worker = eval_run_worker
 
     def __call__(self, environ: dict[str, Any], start_response: Any) -> list[bytes]:
         method = str(environ.get("REQUEST_METHOD", "")).upper()
@@ -2052,9 +2189,6 @@ class JobIngestionAPI:
                 ),
             )
 
-        if create_result.status == "created":
-            self._orchestrate_eval_run(eval_run_id=eval_run_id, suite=suite)
-
         return _json_response(
             start_response,
             HTTPStatus.ACCEPTED,
@@ -2117,76 +2251,7 @@ class JobIngestionAPI:
         )
 
     def _execute_eval_suite(self, *, suite: str) -> tuple[str, dict[str, Any], dict[str, str] | None]:
-        benchmark_module = _EVAL_BENCHMARK_MODULES.get(suite)
-        base_metrics: dict[str, Any] = {
-            "suite": suite,
-            "passed": False,
-            "aggregate": {},
-            "failed_threshold_count": 0,
-            "failed_threshold_metrics": [],
-            "case_count": 0,
-        }
-        if benchmark_module is None:
-            return (
-                "failed",
-                base_metrics,
-                {
-                    "code": "unsupported_eval_suite",
-                    "message": f"Unsupported eval suite: {suite}",
-                },
-            )
-
-        benchmark_runner = getattr(benchmark_module, "run_benchmark", None)
-        if not callable(benchmark_runner):
-            return (
-                "failed",
-                base_metrics,
-                {
-                    "code": "benchmark_runner_unavailable",
-                    "message": f"Eval suite runner is unavailable for suite: {suite}",
-                },
-            )
-
-        try:
-            report, passed = benchmark_runner()
-            report_payload = report if isinstance(report, dict) else {}
-            aggregate_payload = report_payload.get("aggregate", {})
-            failed_thresholds = report_payload.get("failed_thresholds")
-            cases_payload = report_payload.get("cases")
-            failed_threshold_metrics = sorted(
-                [
-                    str(item.get("metric"))
-                    for item in (failed_thresholds if isinstance(failed_thresholds, list) else [])
-                    if isinstance(item, dict) and item.get("metric")
-                ]
-            )
-            metrics: dict[str, Any] = {
-                "suite": suite,
-                "passed": bool(passed),
-                "aggregate": aggregate_payload if isinstance(aggregate_payload, dict) else {},
-                "failed_threshold_count": len(failed_threshold_metrics),
-                "failed_threshold_metrics": failed_threshold_metrics,
-                "case_count": len(cases_payload) if isinstance(cases_payload, list) else 0,
-            }
-            if bool(passed):
-                return "succeeded", metrics, None
-            return (
-                "failed",
-                metrics,
-                {
-                    "code": "benchmark_threshold_failed",
-                    "message": f"Eval suite {suite} failed configured threshold gates",
-                },
-            )
-        except Exception as exc:  # pragma: no cover - defensive path
-            return (
-                "failed",
-                base_metrics,
-                {
-                    "code": "eval_execution_error",
-                    "message": str(exc),
-                },
-            )
+        return _execute_eval_suite(suite)
 
     def _handle_append_interview_response(
         self,
@@ -3058,8 +3123,10 @@ def create_app(
     negotiation_context_aggregator = _NEGOTIATION_CONTEXT_AGGREGATOR_MODULE.DeterministicNegotiationContextAggregator()
     negotiation_strategy_generator = _NEGOTIATION_STRATEGY_GENERATOR_MODULE.DeterministicNegotiationStrategyGenerator()
     negotiation_followup_planner = _NEGOTIATION_FOLLOWUP_PLANNER_MODULE.DeterministicNegotiationFollowupPlanner()
+    repository = SQLiteJobIngestionRepository(resolved_db_path)
+    eval_run_worker = EvalRunWorker(repository=repository)
     return JobIngestionAPI(
-        repository=SQLiteJobIngestionRepository(resolved_db_path),
+        repository=repository,
         extraction_worker=extraction_worker,
         taxonomy_normalizer=taxonomy_normalizer,
         schema_validator=schema_validator,
@@ -3074,6 +3141,7 @@ def create_app(
         negotiation_followup_planner=negotiation_followup_planner,
         auth_bypass_enabled=resolved_auth_bypass_enabled,
         bearer_token=resolved_bearer_token,
+        eval_run_worker=eval_run_worker,
     )
 
 

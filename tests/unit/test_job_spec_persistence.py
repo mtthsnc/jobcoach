@@ -7,6 +7,7 @@ import re
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import closing
 from pathlib import Path
@@ -305,6 +306,21 @@ class JobSpecPersistenceTest(unittest.TestCase):
         )
         return eval_run_id
 
+    def _run_eval_worker_until_terminal(self, *, eval_run_id: str) -> dict[str, Any]:
+        worker = self.app._eval_run_worker
+        self.assertIsNotNone(worker)
+        assert worker is not None
+
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            worker.run_once(limit=1)
+            payload = self.app._repository.get_eval_run_by_id(eval_run_id)
+            if isinstance(payload, dict) and payload.get("status") in {"succeeded", "failed"}:
+                return payload
+            time.sleep(0.05)
+
+        self.fail(f"Eval run did not reach terminal state within timeout: {eval_run_id}")
+
     def test_health_endpoint_is_public_without_authorization(self) -> None:
         status, _, body = _request(
             self.app,
@@ -594,7 +610,7 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertIn("terms[1]", detail_fields)
         self.assertIn("terms[2]", detail_fields)
 
-    def test_run_eval_endpoint_queues_request_and_persists_terminal_metrics(self) -> None:
+    def test_run_eval_endpoint_queues_request_and_requires_worker_for_terminal_transition(self) -> None:
         suite = "job_extraction_v1"
         status, _, body = _request(
             self.app,
@@ -625,20 +641,12 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertIsNotNone(row)
         assert row is not None
         self.assertEqual(row[0], suite)
-        self.assertIn(row[1], {"succeeded", "failed"})
-        terminal_status = str(row[1])
-        metrics_payload = json.loads(row[2]) if row[2] else {}
-        self.assertEqual(metrics_payload.get("suite"), suite)
-        self.assertIsInstance(metrics_payload.get("aggregate"), dict)
-        self.assertIsInstance(metrics_payload.get("case_count"), int)
-        self.assertIsNotNone(row[5])
-        self.assertIsNotNone(row[6])
-        if row[1] == "failed":
-            self.assertIsInstance(row[3], str)
-            self.assertTrue(str(row[3]))
-        else:
-            self.assertIsNone(row[3])
-            self.assertIsNone(row[4])
+        self.assertEqual(row[1], "queued")
+        self.assertEqual(json.loads(row[2]) if row[2] else {}, {})
+        self.assertIsNone(row[3])
+        self.assertIsNone(row[4])
+        self.assertIsNone(row[5])
+        self.assertIsNone(row[6])
         self.assertEqual(json.loads(row[7]), {"suite": suite})
 
         with closing(sqlite3.connect(self.db_path)) as conn:
@@ -652,13 +660,10 @@ class JobSpecPersistenceTest(unittest.TestCase):
                 (eval_run_id,),
             ).fetchall()
 
-        self.assertEqual(len(outbox_rows), 2)
+        self.assertEqual(len(outbox_rows), 1)
         outbox_by_event_type = {str(row[3]): row for row in outbox_rows}
         self.assertIn("eval_run.queued", outbox_by_event_type)
-        self.assertIn(f"eval_run.{terminal_status}", outbox_by_event_type)
-
         queued_row = outbox_by_event_type["eval_run.queued"]
-        terminal_row = outbox_by_event_type[f"eval_run.{terminal_status}"]
 
         self.assertEqual(queued_row[0], f"evt_eval_run_{eval_run_id}_queued")
         self.assertEqual(queued_row[1], "eval_run")
@@ -672,6 +677,43 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertIn("created_at", queued_payload)
         self.assertNotIn("metrics", queued_payload)
         self.assertNotIn("error", queued_payload)
+
+        terminal_payload = self._run_eval_worker_until_terminal(eval_run_id=eval_run_id)
+        terminal_status = str(terminal_payload.get("status"))
+        self.assertIn(terminal_status, {"succeeded", "failed"})
+        metrics_payload = terminal_payload.get("metrics", {})
+        self.assertEqual(metrics_payload.get("suite"), suite)
+        self.assertIsInstance(metrics_payload.get("aggregate"), dict)
+        self.assertIsInstance(metrics_payload.get("case_count"), int)
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            final_row = conn.execute(
+                """
+                SELECT status, metrics_json, error_code, error_message, started_at, completed_at
+                FROM eval_runs
+                WHERE eval_run_id = ?
+                """,
+                (eval_run_id,),
+            ).fetchone()
+            final_outbox_rows = conn.execute(
+                """
+                SELECT event_id, aggregate_type, aggregate_id, event_type, payload_json, status
+                FROM outbox_events
+                WHERE aggregate_type = 'eval_run' AND aggregate_id = ?
+                ORDER BY created_at ASC, event_id ASC
+                """,
+                (eval_run_id,),
+            ).fetchall()
+
+        self.assertIsNotNone(final_row)
+        assert final_row is not None
+        self.assertEqual(final_row[0], terminal_status)
+        self.assertIsNotNone(final_row[4])
+        self.assertIsNotNone(final_row[5])
+        self.assertEqual(len(final_outbox_rows), 2)
+        final_outbox_by_type = {str(row[3]): row for row in final_outbox_rows}
+        self.assertIn(f"eval_run.{terminal_status}", final_outbox_by_type)
+        terminal_row = final_outbox_by_type[f"eval_run.{terminal_status}"]
 
         self.assertEqual(terminal_row[0], f"evt_eval_run_{eval_run_id}_{terminal_status}")
         self.assertEqual(terminal_row[1], "eval_run")
@@ -689,7 +731,7 @@ class JobSpecPersistenceTest(unittest.TestCase):
         if terminal_status == "failed":
             self.assertEqual(
                 terminal_payload.get("error"),
-                {"code": str(row[3]), "message": str(row[4])},
+                {"code": str(final_row[2]), "message": str(final_row[3])},
             )
         else:
             self.assertNotIn("error", terminal_payload)
@@ -755,10 +797,29 @@ class JobSpecPersistenceTest(unittest.TestCase):
 
         self.assertIsNotNone(run_row)
         assert run_row is not None
-        terminal_event_type = f"eval_run.{run_row[2]}"
+        self.assertEqual(str(run_row[2]), "queued")
         self.assertEqual(
             {str(item[0]) for item in outbox_rows},
-            {"eval_run.queued", terminal_event_type},
+            {"eval_run.queued"},
+        )
+
+        terminal_payload = self._run_eval_worker_until_terminal(eval_run_id=first_run_id)
+        terminal_status = str(terminal_payload.get("status"))
+        self.assertIn(terminal_status, {"succeeded", "failed"})
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            final_outbox_rows = conn.execute(
+                """
+                SELECT event_type
+                FROM outbox_events
+                WHERE aggregate_type = 'eval_run' AND aggregate_id = ?
+                ORDER BY created_at ASC, event_id ASC
+                """,
+                (first_run_id,),
+            ).fetchall()
+        self.assertEqual(
+            {str(item[0]) for item in final_outbox_rows},
+            {"eval_run.queued", f"eval_run.{terminal_status}"},
         )
 
     def test_run_eval_endpoint_validates_header_and_suite_payload(self) -> None:

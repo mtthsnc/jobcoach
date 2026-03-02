@@ -35,6 +35,7 @@ if str(ROOT_DIR) not in sys.path:
 if str(API_GATEWAY_DIR) not in sys.path:
     sys.path.insert(0, str(API_GATEWAY_DIR))
 
+from api_gateway.app import EvalRunWorker
 from api_gateway.repository import SQLiteJobIngestionRepository
 
 
@@ -202,29 +203,14 @@ def run_benchmark(
                 suite=benchmark_case.conflict_suite,
             )
 
-            running_payload = repository.mark_eval_run_running(eval_run_id=eval_run_id) if eval_run_id else None
-            terminal_payload = (
-                repository.complete_eval_run(
-                    eval_run_id=eval_run_id,
-                    status=benchmark_case.terminal_status,
-                    metrics=benchmark_case.terminal_metrics,
-                    error_code=(benchmark_case.terminal_error or {}).get("code"),
-                    error_message=(benchmark_case.terminal_error or {}).get("message"),
-                )
-                if eval_run_id
-                else None
-            )
-            retry_payload = (
-                repository.complete_eval_run(
-                    eval_run_id=eval_run_id,
-                    status=benchmark_case.terminal_status,
-                    metrics={"retry_marker": benchmark_case.case_id},
-                    error_code="retry_overwrite_attempt",
-                    error_message="retry overwrite attempt",
-                )
-                if eval_run_id
-                else None
-            )
+            def _suite_executor(_: str) -> tuple[str, dict[str, Any], dict[str, str] | None]:
+                return benchmark_case.terminal_status, benchmark_case.terminal_metrics, benchmark_case.terminal_error
+
+            worker = EvalRunWorker(repository=repository, suite_executor=_suite_executor)
+            worker_result = worker.run_once(limit=1) if eval_run_id else None
+            terminal_payload = repository.get_eval_run_by_id(eval_run_id) if eval_run_id else None
+            retry_worker_result = worker.run_once(limit=1) if eval_run_id else None
+            retry_payload = repository.get_eval_run_by_id(eval_run_id) if eval_run_id else None
 
             outbox_rows = _load_outbox_rows(db_path=db_path, eval_run_id=eval_run_id) if eval_run_id else []
             eval_run_row_count = _count_eval_runs_by_idempotency_key(db_path=db_path, idempotency_key=idempotency_key)
@@ -251,11 +237,13 @@ def run_benchmark(
             idempotency_row_count_pass = eval_run_row_count == 1
             idempotency_pass = create_status_pass and replay_pass and conflict_pass and idempotency_row_count_pass
 
-            running_pass = (
-                isinstance(running_payload, dict)
-                and running_payload.get("status") == "running"
-                and isinstance(running_payload.get("started_at"), str)
+            worker_claim_pass = (
+                worker_result is not None
+                and int(worker_result.claimed_count) == 1
+                and int(worker_result.terminal_count) == 1
+                and int(worker_result.skipped_count) == 0
             )
+            running_pass = isinstance(terminal_payload, dict) and isinstance(terminal_payload.get("started_at"), str)
             terminal_pass = (
                 isinstance(terminal_payload, dict)
                 and terminal_payload.get("status") == benchmark_case.terminal_status
@@ -273,8 +261,12 @@ def run_benchmark(
                 and retry_payload.get("status") == benchmark_case.terminal_status
                 and retry_payload.get("metrics") == benchmark_case.terminal_metrics
                 and retry_payload.get("error") == (terminal_payload or {}).get("error")
+                and retry_worker_result is not None
+                and int(retry_worker_result.claimed_count) == 0
+                and int(retry_worker_result.terminal_count) == 0
+                and int(retry_worker_result.skipped_count) == 0
             )
-            transition_pass = running_pass and terminal_pass and terminal_error_pass and retry_immutability_pass
+            transition_pass = worker_claim_pass and running_pass and terminal_pass and terminal_error_pass and retry_immutability_pass
 
             event_types = {str(row["event_type"]) for row in outbox_rows}
             event_count_pass = len(outbox_rows) == 2
@@ -353,6 +345,7 @@ def run_benchmark(
                     "conflict_suite": benchmark_case.conflict_suite,
                     "eval_run_id": eval_run_id,
                     "terminal_status": benchmark_case.terminal_status,
+                    "worker_claimed_count": int(worker_result.claimed_count) if worker_result is not None else 0,
                     "transition_pass": transition_pass,
                     "idempotency_pass": idempotency_pass,
                     "lifecycle_event_integrity_pass": lifecycle_event_integrity_pass,

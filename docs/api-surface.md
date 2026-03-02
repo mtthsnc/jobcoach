@@ -17,6 +17,11 @@ Outbox relay guardrails:
 - Publish failures increment `publish_attempts`, persist bounded `last_error`, and schedule deterministic retry backoff.
 - Retry-exhausted events transition to terminal dead-letter state (`status=failed`) with `dead_lettered_at` metadata.
 
+Eval orchestration guardrails:
+- `POST /v1/evals/run` is enqueue-only and returns deterministic queued acknowledgements.
+- Eval execution occurs in worker polls that deterministically claim queued runs (`created_at`, then `eval_run_id`).
+- Worker transitions persist `queued -> running -> terminal` metadata and emit relay-compatible lifecycle outbox events (`eval_run.queued`, terminal event).
+
 ## Implemented Endpoints (API Gateway)
 
 - `POST /job-ingestions`

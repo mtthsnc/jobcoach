@@ -210,6 +210,52 @@ class EvalRunRepositoryTest(unittest.TestCase):
         missing = self.repository.get_eval_run_by_id("eval_missing_001")
         self.assertIsNone(missing)
 
+    def test_claim_next_queued_eval_run_is_deterministic_and_updates_running_state(self) -> None:
+        first_create = self.repository.create_or_get_eval_run(
+            idempotency_key="eval-claim-001",
+            request_payload={"suite": "feedback_quality_v1"},
+            suite="feedback_quality_v1",
+        )
+        second_create = self.repository.create_or_get_eval_run(
+            idempotency_key="eval-claim-002",
+            request_payload={"suite": "trajectory_quality_v1"},
+            suite="trajectory_quality_v1",
+        )
+        self.assertEqual(first_create.status, "created")
+        self.assertEqual(second_create.status, "created")
+        assert first_create.eval_run is not None
+        assert second_create.eval_run is not None
+        first_eval_run_id = str(first_create.eval_run["eval_run_id"])
+        second_eval_run_id = str(second_create.eval_run["eval_run_id"])
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            with conn:
+                conn.execute(
+                    "UPDATE eval_runs SET created_at = '2026-03-01 00:00:01' WHERE eval_run_id = ?",
+                    (first_eval_run_id,),
+                )
+                conn.execute(
+                    "UPDATE eval_runs SET created_at = '2026-03-01 00:00:02' WHERE eval_run_id = ?",
+                    (second_eval_run_id,),
+                )
+
+        first_claim = self.repository.claim_next_queued_eval_run()
+        self.assertIsNotNone(first_claim)
+        assert first_claim is not None
+        self.assertEqual(first_claim.get("eval_run_id"), first_eval_run_id)
+        self.assertEqual(first_claim.get("status"), "running")
+        self.assertIsInstance(first_claim.get("started_at"), str)
+
+        second_claim = self.repository.claim_next_queued_eval_run()
+        self.assertIsNotNone(second_claim)
+        assert second_claim is not None
+        self.assertEqual(second_claim.get("eval_run_id"), second_eval_run_id)
+        self.assertEqual(second_claim.get("status"), "running")
+        self.assertIsInstance(second_claim.get("started_at"), str)
+
+        no_claim = self.repository.claim_next_queued_eval_run()
+        self.assertIsNone(no_claim)
+
     def test_eval_run_transition_methods_persist_running_and_terminal_states(self) -> None:
         create_result = self.repository.create_or_get_eval_run(
             idempotency_key="eval-transition-001",

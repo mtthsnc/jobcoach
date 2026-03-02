@@ -6,6 +6,7 @@ import re
 import shlex
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -17,6 +18,7 @@ from urllib import error, parse, request
 
 
 ROOT = Path(__file__).resolve().parents[2]
+API_GATEWAY_DIR = ROOT / "apps" / "api-gateway"
 MIGRATIONS_DIR = ROOT / "infra" / "migrations"
 FIXTURES_ROOT = ROOT / "tests" / "contracts" / "fixtures" / "job_ingestions"
 
@@ -28,6 +30,12 @@ CONTRACT_BEARER_TOKEN = "contract-test-token"
 
 UP_MARKER = re.compile(r"^\s*--\s*\+goose\s+Up\s*$")
 DOWN_MARKER = re.compile(r"^\s*--\s*\+goose\s+Down\s*$")
+
+if str(API_GATEWAY_DIR) not in sys.path:
+    sys.path.insert(0, str(API_GATEWAY_DIR))
+
+from api_gateway.app import EvalRunWorker
+from api_gateway.repository import SQLiteJobIngestionRepository
 
 
 def _parse_up_sql(path: Path) -> str:
@@ -217,6 +225,9 @@ class JobIngestionApiContractTest(unittest.TestCase):
             db_path=cls.db_path,
         )
         cls.api_process.start()
+        cls.eval_run_worker = EvalRunWorker(
+            repository=SQLiteJobIngestionRepository(cls.db_path),
+        )
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -460,7 +471,7 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertIn("terms[1]", detail_fields)
         self.assertIn("terms[2]", detail_fields)
 
-    def test_run_eval_contract_persists_terminal_metrics(self) -> None:
+    def test_run_eval_contract_queues_request_and_worker_persists_terminal_metrics(self) -> None:
         suite = "job_extraction_v1"
         idempotency_key = f"eval-run-create-{uuid.uuid4()}"
         status, body = _request_json(
@@ -480,6 +491,15 @@ class JobIngestionApiContractTest(unittest.TestCase):
         self.assertTrue(eval_run_id)
         assert isinstance(eval_run_id, str)
         self._assert_meta(body.get("meta", {}))
+
+        self._assert_eval_run_row_queued(
+            eval_run_id=eval_run_id,
+            suite=suite,
+            idempotency_key=idempotency_key,
+            request_payload={"suite": suite},
+        )
+        self._assert_eval_run_outbox_only_queued(eval_run_id=eval_run_id, suite=suite)
+        self._run_eval_worker_until_terminal(eval_run_id=eval_run_id)
 
         terminal_status = self._assert_eval_run_row_persisted(
             eval_run_id=eval_run_id,
@@ -528,6 +548,16 @@ class JobIngestionApiContractTest(unittest.TestCase):
         )
         self.assertEqual(conflict_status, 409, conflict_body)
         self.assertEqual(conflict_body.get("error", {}).get("code"), "idempotency_key_conflict")
+
+        self._assert_eval_run_row_queued(
+            eval_run_id=first_run_id,
+            suite="feedback_quality_v1",
+            idempotency_key=idempotency_key,
+            request_payload={"suite": "feedback_quality_v1"},
+        )
+        self._assert_eval_run_outbox_only_queued(eval_run_id=first_run_id, suite="feedback_quality_v1")
+        self._run_eval_worker_until_terminal(eval_run_id=first_run_id)
+
         terminal_status = self._assert_eval_run_row_persisted(
             eval_run_id=first_run_id,
             suite="feedback_quality_v1",
@@ -2875,6 +2905,88 @@ class JobIngestionApiContractTest(unittest.TestCase):
             else:
                 self.assertEqual(actual_canonical, canonical_term)
             self.assertAlmostEqual(actual_confidence, confidence, places=6)
+
+    def _run_eval_worker_until_terminal(self, *, eval_run_id: str) -> str:
+        deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            self.eval_run_worker.run_once(limit=1)
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                row = conn.execute(
+                    "SELECT status FROM eval_runs WHERE eval_run_id = ?",
+                    (eval_run_id,),
+                ).fetchone()
+            if row is not None and str(row[0]) in {"succeeded", "failed"}:
+                return str(row[0])
+            time.sleep(0.05)
+        self.fail(f"Eval worker did not reach terminal state for eval_run_id={eval_run_id}")
+
+    def _assert_eval_run_row_queued(
+        self,
+        *,
+        eval_run_id: str,
+        suite: str,
+        idempotency_key: str,
+        request_payload: dict[str, str],
+    ) -> None:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    eval_run_id,
+                    suite,
+                    status,
+                    idempotency_key,
+                    request_json,
+                    metrics_json,
+                    error_code,
+                    error_message,
+                    started_at,
+                    completed_at
+                FROM eval_runs
+                WHERE eval_run_id = ?
+                """,
+                (eval_run_id,),
+            ).fetchone()
+
+        self.assertIsNotNone(row, f"Eval run row missing for eval_run_id={eval_run_id}")
+        assert row is not None
+        self.assertEqual(row[0], eval_run_id)
+        self.assertEqual(row[1], suite)
+        self.assertEqual(row[2], "queued")
+        self.assertEqual(row[3], idempotency_key)
+        self.assertEqual(json.loads(str(row[4])), request_payload)
+        self.assertEqual(json.loads(str(row[5])) if row[5] is not None else {}, {})
+        self.assertIsNone(row[6])
+        self.assertIsNone(row[7])
+        self.assertIsNone(row[8])
+        self.assertIsNone(row[9])
+
+    def _assert_eval_run_outbox_only_queued(self, *, eval_run_id: str, suite: str) -> None:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            rows = conn.execute(
+                """
+                SELECT event_id, aggregate_type, aggregate_id, event_type, payload_json, status
+                FROM outbox_events
+                WHERE aggregate_type = 'eval_run' AND aggregate_id = ?
+                ORDER BY created_at ASC, event_id ASC
+                """,
+                (eval_run_id,),
+            ).fetchall()
+
+        self.assertEqual(len(rows), 1, f"Expected only queued outbox event for eval_run_id={eval_run_id}")
+        queued_row = rows[0]
+        self.assertEqual(queued_row[0], f"evt_eval_run_{eval_run_id}_queued")
+        self.assertEqual(queued_row[1], "eval_run")
+        self.assertEqual(queued_row[2], eval_run_id)
+        self.assertEqual(queued_row[3], "eval_run.queued")
+        self.assertEqual(queued_row[5], "pending")
+        payload = json.loads(str(queued_row[4]))
+        self.assertEqual(payload.get("eval_run_id"), eval_run_id)
+        self.assertEqual(payload.get("suite"), suite)
+        self.assertEqual(payload.get("status"), "queued")
+        self.assertIn("created_at", payload)
+        self.assertNotIn("metrics", payload)
+        self.assertNotIn("error", payload)
 
     def _assert_eval_run_row_persisted(
         self,

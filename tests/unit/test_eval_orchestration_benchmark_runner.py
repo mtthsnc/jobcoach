@@ -69,6 +69,7 @@ class EvalOrchestrationBenchmarkRunnerTest(unittest.TestCase):
         self.assertIn("transition_pass", first_case)
         self.assertIn("idempotency_pass", first_case)
         self.assertIn("lifecycle_event_integrity_pass", first_case)
+        self.assertIn("worker_claimed_count", first_case)
         self.assertIn("event_types", first_case)
         self.assertIn("event_count", first_case)
         self.assertIn("eval_run_row_count_for_idempotency_key", first_case)

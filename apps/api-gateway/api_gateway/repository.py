@@ -472,6 +472,58 @@ class SQLiteJobIngestionRepository:
 
         return _row_to_eval_run(row) if row is not None else None
 
+    def claim_next_queued_eval_run(self) -> dict[str, Any] | None:
+        with closing(self._connect()) as connection:
+            with connection:
+                for _ in range(32):
+                    candidate_row = connection.execute(
+                        """
+                        SELECT eval_run_id
+                        FROM eval_runs
+                        WHERE status = 'queued'
+                        ORDER BY created_at ASC, eval_run_id ASC
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if candidate_row is None:
+                        return None
+
+                    eval_run_id = str(candidate_row["eval_run_id"])
+                    claim_cursor = connection.execute(
+                        """
+                        UPDATE eval_runs
+                        SET status = 'running',
+                            started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+                            error_code = NULL,
+                            error_message = NULL
+                        WHERE eval_run_id = ?
+                          AND status = 'queued'
+                        """,
+                        (eval_run_id,),
+                    )
+                    if claim_cursor.rowcount != 1:
+                        continue
+
+                    claimed_row = connection.execute(
+                        """
+                        SELECT
+                            eval_run_id,
+                            suite,
+                            status,
+                            metrics_json,
+                            error_code,
+                            error_message,
+                            created_at,
+                            started_at,
+                            completed_at
+                        FROM eval_runs
+                        WHERE eval_run_id = ?
+                        """,
+                        (eval_run_id,),
+                    ).fetchone()
+                    return _row_to_eval_run(claimed_row) if claimed_row is not None else None
+        return None
+
     def mark_eval_run_running(self, *, eval_run_id: str) -> dict[str, Any] | None:
         normalized_eval_run_id = str(eval_run_id).strip()
         if not normalized_eval_run_id:

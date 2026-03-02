@@ -2468,3 +2468,52 @@ Use UTC timestamps. Append entries only.
   - In this sandbox, contract tests require elevated execution due local API socket bind restrictions.
 - Next pointer:
   - Execute `M8-004` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-02T09:16:48Z
+- Execute `M8-004` async eval orchestration via worker-driven lifecycle transitions.
+- Task IDs: M8-004
+- Changes made:
+  - Started implementation to remove synchronous eval execution from `POST /v1/evals/run`, add deterministic queue claim + worker terminal transitions, and update orchestration tests/benchmarks/docs.
+- Validation evidence:
+  - Planned: targeted eval orchestration unit tests, then full `make test`, `make validate-openapi`, migrate up/down checks, and `make contract-test`.
+- Blockers / risks:
+  - Contract tests expected to require elevated execution in this sandbox due local API bind restrictions.
+- Next pointer:
+  - Complete `M8-004` implementation/tests and advance pointer to `M8-005`.
+
+- END
+- 2026-03-02T09:24:34Z
+- Execute `M8-004` async eval orchestration via worker-driven lifecycle transitions.
+- Task IDs: M8-004
+- Changes made:
+  - Implemented async eval worker orchestration in `apps/api-gateway/api_gateway/app.py`:
+    - added module-level eval suite executor and `EvalRunWorker` with deterministic `run_once` polling semantics,
+    - wired `create_app` to construct and expose an eval worker instance bound to shared repository state,
+    - removed inline synchronous orchestration call from `POST /v1/evals/run` so create path is enqueue-only.
+  - Added deterministic queue-claim repository primitive in `apps/api-gateway/api_gateway/repository.py`:
+    - new `claim_next_queued_eval_run` transitions oldest queued row to `running` (`created_at`, then `eval_run_id` ordering) with replay-safe claim semantics.
+  - Updated eval orchestration benchmark and tests:
+    - `services/quality-eval/benchmark/eval_orchestration_benchmark.py` now validates worker-driven transitions instead of direct repository transition calls,
+    - added unit coverage in `tests/unit/test_eval_run_worker.py`,
+    - expanded repository coverage in `tests/unit/test_eval_run_repository.py`,
+    - updated API/unit/contract eval tests for queue-first acknowledgement + explicit worker polling in:
+      - `tests/unit/test_job_spec_persistence.py`
+      - `tests/contracts/test_job_ingestions_api_contract.py`
+      - `tests/unit/test_eval_orchestration_benchmark_runner.py`
+  - Updated continuity/docs:
+    - `docs/tasklist.md`: marked `M8-004` as `DONE`; advanced NEXT queue to `M8-005` then `M8-006`.
+    - `docs/NEXT_ACTION.md`: advanced active pointer to `M8-005`.
+    - `docs/decision-log.md`: added `DEC-028` for async eval worker orchestration decision.
+    - `docs/api-surface.md`: documented eval queue/worker lifecycle guardrails.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.unit.test_eval_run_repository tests.unit.test_eval_run_worker tests.unit.test_job_spec_persistence tests.unit.test_eval_orchestration_benchmark_runner` (pass)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 make test` (pass)
+  - `make validate-openapi` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m8-004-migrate-up.sqlite3 make migrate-up` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m8-004-migrate-down.sqlite3 make migrate-down` (pass)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test` (initial sandbox bind failure; pass on elevated rerun)
+- Blockers / risks:
+  - In this sandbox, contract tests require elevated execution due local API socket bind restrictions.
+- Next pointer:
+  - Execute `M8-005` from `docs/NEXT_ACTION.md`.

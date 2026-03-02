@@ -349,3 +349,19 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Keep failure tracking only in `failure_count` without explicit publish-attempt/dead-letter metadata fields.
   - Use unbounded retries and rely on operator intervention instead of deterministic retry exhaustion handling.
+
+- Decision ID: `DEC-028`
+- Date (UTC): `2026-03-02`
+- Status: `accepted`
+- Context: `M8-004` required removing synchronous benchmark execution from `POST /v1/evals/run` and moving eval lifecycle progression to deterministic async worker orchestration while preserving idempotent queued acknowledgements and relay-compatible lifecycle events.
+- Decision: Introduce an explicit eval worker orchestration path by adding:
+  - repository claim primitive `claim_next_queued_eval_run` (deterministic queue order: `created_at`, then `eval_run_id`) for `queued -> running`,
+  - `EvalRunWorker` in API gateway module to run `running -> terminal` execution with persisted metrics/error metadata via `complete_eval_run`,
+  - enqueue-only behavior in `POST /v1/evals/run` (no inline benchmark execution), with worker polling responsible for terminal transitions and outbox terminal event emission.
+- Consequences:
+  - API write-path latency for eval creation is decoupled from benchmark runtime and always returns deterministic queued acknowledgements.
+  - Terminal lifecycle state is now controlled by repeatable worker polls, enabling replay-safe orchestration and clean separation from HTTP request handling.
+  - Unit/contract/benchmark coverage now validates queue-first semantics and worker-driven transitions before asserting terminal state and lifecycle events.
+- Alternatives considered:
+  - Keep synchronous execution in request path and treat async worker as optional fallback.
+  - Trigger worker execution inline inside API process immediately after enqueue, which preserves current coupling and does not provide true asynchronous orchestration boundaries.
