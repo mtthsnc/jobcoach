@@ -1,4 +1,4 @@
-.PHONY: help lint test benchmark-extraction benchmark-candidate-parse benchmark-interview-relevance benchmark-feedback-quality benchmark-trajectory-quality benchmark-negotiation-quality benchmark-eval-orchestration migrate-up migrate-down contract-test validate-openapi docker-build docker-up docker-down docker-logs docker-ps docker-shell docker-test
+.PHONY: help lint test benchmark-extraction benchmark-candidate-parse benchmark-interview-relevance benchmark-feedback-quality benchmark-trajectory-quality benchmark-negotiation-quality benchmark-eval-orchestration migrate-up migrate-down contract-test validate-openapi docker-build docker-up docker-url docker-down docker-logs docker-ps docker-shell docker-test
 
 PYTHON ?= python3
 OPENAPI_SPEC ?= schemas/openapi/openapi.yaml
@@ -24,6 +24,7 @@ FEEDBACK_BENCHMARK_REPORT_PATH ?= .tmp/feedback-quality-benchmark-report.json
 DOCKER_COMPOSE ?= docker compose
 DOCKER_SERVICE ?= api
 DOCKER_IMAGE ?= jobcoach-api:dev
+DOCKER_HOST_PORT ?= 0
 TRAJECTORY_BENCHMARK_RUNNER ?= services/quality-eval/benchmark/trajectory_quality_benchmark.py
 TRAJECTORY_BENCHMARK_FIXTURE_DIR ?= tests/unit/fixtures/trajectory_quality
 TRAJECTORY_BENCHMARK_REPORT_PATH ?= .tmp/trajectory-quality-benchmark-report.json
@@ -112,7 +113,18 @@ docker-build: ## Build Docker image for API runtime
 	@docker build -t "$(DOCKER_IMAGE)" .
 
 docker-up: ## Start API via docker compose
-	@$(DOCKER_COMPOSE) up --build -d "$(DOCKER_SERVICE)"
+	@DOCKER_HOST_PORT="$(DOCKER_HOST_PORT)" $(DOCKER_COMPOSE) up --build -d "$(DOCKER_SERVICE)"
+	@$(MAKE) docker-url DOCKER_HOST_PORT="$(DOCKER_HOST_PORT)"
+
+docker-url: ## Print API URL for current docker compose port mapping
+	@set -eu; \
+	mapped="$$(DOCKER_HOST_PORT="$(DOCKER_HOST_PORT)" $(DOCKER_COMPOSE) port "$(DOCKER_SERVICE)" 8000 2>/dev/null | head -n1 || true)"; \
+	if [ -z "$$mapped" ]; then \
+	  echo "docker-url: no published port found (is $(DOCKER_SERVICE) running?)"; \
+	  exit 1; \
+	fi; \
+	host_port="$$(printf '%s\n' "$$mapped" | sed -E 's/.*:([0-9]+)$$/\1/')"; \
+	echo "API URL: http://127.0.0.1:$$host_port"
 
 docker-down: ## Stop docker compose services
 	@$(DOCKER_COMPOSE) down

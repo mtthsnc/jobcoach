@@ -56,8 +56,17 @@ Prerequisites:
 
 ```bash
 make docker-up
+make docker-url
 make docker-test
 make docker-down
+```
+
+By default, Docker publishes the container on a random free host port so it
+does not clash with services already using `8000`. If you need a fixed host
+port, set one explicitly:
+
+```bash
+DOCKER_HOST_PORT=8000 make docker-up
 ```
 
 ## Choose Your Path

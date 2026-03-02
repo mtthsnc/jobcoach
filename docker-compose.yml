@@ -11,7 +11,7 @@ services:
       MIGRATE_DB_PATH: /data/jobcoach.sqlite3
       JOBCOACH_AUTO_MIGRATE: "1"
     ports:
-      - "8000:8000"
+      - "127.0.0.1:${DOCKER_HOST_PORT:-0}:8000"
     volumes:
       - jobcoach-data:/data
     healthcheck:
