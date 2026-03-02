@@ -40,6 +40,9 @@ jobs:
       - name: Show eval orchestration benchmark report
         run: cat .tmp/eval-orchestration-benchmark-report.json
 
+      - name: Show API read-path latency benchmark report
+        run: cat .tmp/api-read-latency-benchmark-report.json
+
       - name: Run deterministic migration targets
         run: make migrate-up migrate-down
 

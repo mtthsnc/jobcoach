@@ -26,6 +26,9 @@ JobCoach enforces deterministic benchmark thresholds in local validation and CI.
   - `idempotency_correctness_rate >= 1.00`
   - `lifecycle_event_integrity_rate >= 1.00`
   - `overall_eval_orchestration_quality >= 1.00`
+- API read-path latency benchmark:
+  - `read_path_p95_ms <= 400.0`
+  - `read_path_success_rate >= 1.00`
 
 ## Testing Strategy
 

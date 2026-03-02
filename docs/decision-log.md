@@ -365,3 +365,19 @@ Record architecture and product decisions in ADR-lite format.
 - Alternatives considered:
   - Keep synchronous execution in request path and treat async worker as optional fallback.
   - Trigger worker execution inline inside API process immediately after enqueue, which preserves current coupling and does not provide true asynchronous orchestration boundaries.
+
+- Decision ID: `DEC-029`
+- Date (UTC): `2026-03-02`
+- Status: `accepted`
+- Context: `M8-005` required explicit operational probe semantics plus a deterministic API read-path latency gate to enforce `p95 <= 400ms` across implemented GET surfaces.
+- Decision: Add:
+  - dedicated unauthenticated `/readiness` runtime probe with deterministic process/database checks and stable response envelopes (`200 ready`, `503 service_unavailable` with structured failure details),
+  - repository-level DB readiness probe primitive (`probe_readiness`) used by gateway readiness checks,
+  - deterministic in-process API read-path benchmark (`api_read_latency_benchmark.py`) that seeds canonical resources, times GET endpoints, computes aggregate latency metrics, and enforces `read_path_p95_ms <= 400.0` (plus success-rate integrity).
+- Consequences:
+  - Liveness (`/health`) and readiness (`/readiness`) responsibilities are now explicitly separated for operational monitoring and rollout gating.
+  - Local/CI validation now fails on read-path latency regressions through `make test` benchmark execution and machine-readable report artifacts.
+  - Probe behavior and latency-gate regressions are covered by unit/contract/benchmark tests, reducing risk of silent operational drift.
+- Alternatives considered:
+  - Keep `/health` as a mixed liveness/readiness signal without dependency checks.
+  - Rely on ad hoc manual latency checks rather than a deterministic threshold-gated benchmark in local/CI flows.

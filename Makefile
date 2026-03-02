@@ -1,4 +1,4 @@
-.PHONY: help lint test benchmark-extraction benchmark-candidate-parse benchmark-interview-relevance benchmark-feedback-quality benchmark-trajectory-quality benchmark-negotiation-quality benchmark-eval-orchestration migrate-up migrate-down contract-test validate-openapi docker-build docker-up docker-url docker-down docker-logs docker-ps docker-shell docker-test
+.PHONY: help lint test benchmark-extraction benchmark-candidate-parse benchmark-interview-relevance benchmark-feedback-quality benchmark-trajectory-quality benchmark-negotiation-quality benchmark-eval-orchestration benchmark-api-read-latency migrate-up migrate-down contract-test validate-openapi docker-build docker-up docker-url docker-down docker-logs docker-ps docker-shell docker-test
 
 PYTHON ?= python3
 OPENAPI_SPEC ?= schemas/openapi/openapi.yaml
@@ -34,6 +34,8 @@ NEGOTIATION_BENCHMARK_REPORT_PATH ?= .tmp/negotiation-quality-benchmark-report.j
 EVAL_ORCHESTRATION_BENCHMARK_RUNNER ?= services/quality-eval/benchmark/eval_orchestration_benchmark.py
 EVAL_ORCHESTRATION_BENCHMARK_FIXTURE_DIR ?= tests/unit/fixtures/eval_orchestration
 EVAL_ORCHESTRATION_BENCHMARK_REPORT_PATH ?= .tmp/eval-orchestration-benchmark-report.json
+READ_PATH_LATENCY_BENCHMARK_RUNNER ?= services/quality-eval/benchmark/api_read_latency_benchmark.py
+READ_PATH_LATENCY_BENCHMARK_REPORT_PATH ?= .tmp/api-read-latency-benchmark-report.json
 
 help: ## Show available targets
 	@echo "Available targets:"
@@ -71,7 +73,9 @@ test: ## Run unit tests
 	echo "test: running negotiation quality benchmark threshold gate"; \
 	$(PYTHON) "$(NEGOTIATION_BENCHMARK_RUNNER)" --fixtures-dir "$(NEGOTIATION_BENCHMARK_FIXTURE_DIR)" --report-path "$(NEGOTIATION_BENCHMARK_REPORT_PATH)"; \
 	echo "test: running eval orchestration benchmark threshold gate"; \
-	$(PYTHON) "$(EVAL_ORCHESTRATION_BENCHMARK_RUNNER)" --fixtures-dir "$(EVAL_ORCHESTRATION_BENCHMARK_FIXTURE_DIR)" --report-path "$(EVAL_ORCHESTRATION_BENCHMARK_REPORT_PATH)"
+	$(PYTHON) "$(EVAL_ORCHESTRATION_BENCHMARK_RUNNER)" --fixtures-dir "$(EVAL_ORCHESTRATION_BENCHMARK_FIXTURE_DIR)" --report-path "$(EVAL_ORCHESTRATION_BENCHMARK_REPORT_PATH)"; \
+	echo "test: running API read-path latency benchmark threshold gate"; \
+	$(PYTHON) "$(READ_PATH_LATENCY_BENCHMARK_RUNNER)" --report-path "$(READ_PATH_LATENCY_BENCHMARK_REPORT_PATH)"
 
 benchmark-extraction: ## Run extraction benchmark threshold gate and emit report
 	@$(PYTHON) "$(BENCHMARK_RUNNER)" --fixtures-dir "$(BENCHMARK_FIXTURE_DIR)" --report-path "$(BENCHMARK_REPORT_PATH)"
@@ -93,6 +97,9 @@ benchmark-negotiation-quality: ## Run negotiation/follow-up quality benchmark th
 
 benchmark-eval-orchestration: ## Run eval orchestration quality benchmark threshold gate and emit report
 	@$(PYTHON) "$(EVAL_ORCHESTRATION_BENCHMARK_RUNNER)" --fixtures-dir "$(EVAL_ORCHESTRATION_BENCHMARK_FIXTURE_DIR)" --report-path "$(EVAL_ORCHESTRATION_BENCHMARK_REPORT_PATH)"
+
+benchmark-api-read-latency: ## Run API read-path latency benchmark threshold gate and emit report
+	@$(PYTHON) "$(READ_PATH_LATENCY_BENCHMARK_RUNNER)" --report-path "$(READ_PATH_LATENCY_BENCHMARK_REPORT_PATH)"
 
 migrate-up: ## Apply all SQL up migrations to a local SQLite db
 	@MIGRATE_DB_PATH="$(MIGRATE_DB_PATH)" "$(MIGRATE_SCRIPT)" up

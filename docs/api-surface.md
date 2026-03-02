@@ -4,7 +4,8 @@ Runtime base path: `/v1`
 
 Auth guardrails:
 - `/v1/*` endpoints require `Authorization: Bearer <token>`.
-- `/health` remains unauthenticated for readiness/liveness probing.
+- `/health` remains unauthenticated for liveness probing.
+- `/readiness` remains unauthenticated for runtime dependency readiness probing (process + DB).
 - Local-dev bypass is controlled explicitly via `JOBCOACH_AUTH_BYPASS=true`.
 
 Request observability guardrails:
@@ -21,6 +22,11 @@ Eval orchestration guardrails:
 - `POST /v1/evals/run` is enqueue-only and returns deterministic queued acknowledgements.
 - Eval execution occurs in worker polls that deterministically claim queued runs (`created_at`, then `eval_run_id`).
 - Worker transitions persist `queued -> running -> terminal` metadata and emit relay-compatible lifecycle outbox events (`eval_run.queued`, terminal event).
+
+Runtime probe guardrails:
+- `/health` returns deterministic liveness envelope (`status=ok`) and does not check dependencies.
+- `/readiness` verifies core process + database dependency checks with deterministic envelopes.
+- `/readiness` returns `200` when all checks pass and `503 service_unavailable` with structured failure details when any required check fails.
 
 ## Implemented Endpoints (API Gateway)
 

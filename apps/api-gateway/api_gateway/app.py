@@ -51,6 +51,7 @@ NEGOTIATION_ROUTE_PREFIX = "/v1/negotiation-plans/"
 TRAJECTORY_ROUTE_PREFIX = "/v1/trajectory-plans/"
 EVAL_RUN_ROUTE = "/v1/evals/run"
 EVAL_ROUTE_PREFIX = "/v1/evals/"
+READINESS_ROUTE = "/readiness"
 JOB_SPEC_ROUTE_PREFIX = "/v1/job-specs/"
 JOB_SPEC_REVIEW_ROUTE_SUFFIX = "/review"
 COMPETENCY_FIT_ROUTE = "/v1/competency-fits"
@@ -381,6 +382,31 @@ class JobIngestionAPI:
                     request_id=request_id,
                     data={"status": "ok"},
                 ),
+            )
+
+        if path == READINESS_ROUTE:
+            if method != "GET":
+                return _json_response(
+                    start_response,
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_envelope(request_id=request_id, code="method_not_allowed", message="Method not allowed", retryable=False),
+                    headers=[("Allow", "GET")],
+                )
+            readiness_ready, readiness_data, readiness_details = self._readiness_probe()
+            response_payload = _success_envelope(request_id=request_id, data=readiness_data)
+            status_code = HTTPStatus.OK
+            if not readiness_ready:
+                status_code = HTTPStatus.SERVICE_UNAVAILABLE
+                response_payload["error"] = {
+                    "code": "service_unavailable",
+                    "message": "Service readiness checks failed",
+                    "retryable": True,
+                    "details": readiness_details,
+                }
+            return _json_response(
+                start_response,
+                status_code,
+                response_payload,
             )
 
         unauthorized_payload = self._authorize_v1_request(environ=environ, request_id=request_id, path=path)
@@ -786,6 +812,50 @@ class JobIngestionAPI:
         if isinstance(auth_failure_reason, str) and auth_failure_reason:
             event["auth_failure_reason"] = auth_failure_reason
         REQUEST_LOGGER.info(json.dumps(event, separators=(",", ":"), ensure_ascii=False, sort_keys=True))
+
+    def _readiness_probe(self) -> tuple[bool, dict[str, Any], list[dict[str, str]]]:
+        details: list[dict[str, str]] = []
+        checks: dict[str, dict[str, str]] = {
+            "process": {"status": "ok"},
+        }
+
+        database_ready = False
+        database_error_code = "repository_unavailable"
+        if self._repository is not None:
+            readiness_probe = getattr(self._repository, "probe_readiness", None)
+            if callable(readiness_probe):
+                try:
+                    readiness_result = readiness_probe()
+                except Exception:  # pragma: no cover - defensive path
+                    database_error_code = "probe_execution_failed"
+                else:
+                    if isinstance(readiness_result, tuple) and len(readiness_result) == 2:
+                        raw_db_ready, raw_error_code = readiness_result
+                        database_ready = bool(raw_db_ready)
+                        if isinstance(raw_error_code, str) and raw_error_code.strip():
+                            database_error_code = raw_error_code.strip()
+                        elif database_ready:
+                            database_error_code = ""
+                        else:
+                            database_error_code = "database_unavailable"
+                    else:
+                        database_error_code = "invalid_probe_result"
+            else:
+                database_error_code = "probe_unavailable"
+
+        if database_ready:
+            checks["database"] = {"status": "ok"}
+        else:
+            normalized_reason = database_error_code or "database_unavailable"
+            checks["database"] = {"status": "failed", "reason": normalized_reason}
+            details.append({"field": "database", "reason": normalized_reason})
+
+        ready = database_ready
+        payload = {
+            "status": "ready" if ready else "not_ready",
+            "checks": checks,
+        }
+        return ready, payload, details
 
     def _authorize_v1_request(
         self,
@@ -5437,6 +5507,8 @@ def _status_code_from_start_line(status: str) -> int:
 def _route_pattern_for_path(path: str) -> str:
     if path == "/health":
         return "/health"
+    if path == READINESS_ROUTE:
+        return READINESS_ROUTE
     if path == "/v1/job-ingestions":
         return "/v1/job-ingestions"
     if path.startswith("/v1/job-ingestions/"):

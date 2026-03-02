@@ -1738,6 +1738,15 @@ class SQLiteJobIngestionRepository:
                     current_version=int(updated_row["version"]),
                 )
 
+    def probe_readiness(self) -> tuple[bool, str | None]:
+        try:
+            with closing(self._connect()) as connection:
+                connection.execute("SELECT 1").fetchone()
+            return True, None
+        except sqlite3.Error as exc:
+            error_code = f"sqlite_{exc.__class__.__name__.lower()}"
+            return False, error_code
+
     def _connect(self):
         return connect_row_factory(self._db_path)
 

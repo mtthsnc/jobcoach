@@ -72,15 +72,15 @@ Status legend: `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`
 | M8-002 | DONE | P0 | M8 | Add structured request logging with request-id propagation, latency metrics, and sensitive-field redaction policy | M8-001 | Logs emit route/method/status/latency/request_id without leaking raw CV/story payloads and redaction coverage tests pass |
 | M8-003 | DONE | P0 | M8 | Implement outbox relay worker with bounded retry/backoff, publish-attempt tracking, and dead-letter semantics | M8-002,M0-005 | Pending outbox events publish deterministically with retry-safe transitions and failure-path tests cover retry exhaustion + dead-letter handling |
 | M8-004 | DONE | P0 | M8 | Shift eval execution to asynchronous worker orchestration (`queued` -> `running` -> terminal) backed by outbox relay flow | M8-003,M7-006 | `POST /evals/run` returns queued acknowledgment while worker-driven transitions persist deterministically and GET contract tests cover queued/running/terminal polling states |
-| M8-005 | TODO | P1 | M8 | Add runtime health/readiness probes and API read-path latency benchmark gate (`p95 <= 400ms`) | M8-004 | Health/readiness checks are deterministic and latency benchmark gate is enforced in local/CI validation |
+| M8-005 | DONE | P1 | M8 | Add runtime health/readiness probes and API read-path latency benchmark gate (`p95 <= 400ms`) | M8-004 | Health/readiness checks are deterministic and latency benchmark gate is enforced in local/CI validation |
 | M8-006 | TODO | P1 | M8 | Document and enforce data-retention/redaction operations runbook for sensitive artifacts and logs | M8-002,M8-005 | Retention/redaction policy docs are committed, automated checks cover expiry/redaction behavior, and risk register mitigation status is updated |
 | M8-CLOSE-001 | TODO | P1 | M8 | Run final M8 stabilization sweep + release notes and close milestone | M8-006 | Full validation suite passes and M8 closeout notes are recorded with next-milestone handoff pointer |
 | M9-PLAN-001 | TODO | P0 | M9 | Define executable M9 backlog with dependencies and acceptance criteria | M8-CLOSE-001 | M9 task graph is committed and NEXT pointer targets first executable M9 task |
 
 ## NEXT
 
-- `NEXT-1`: Execute `M8-005` (runtime health/readiness probes + read-path latency benchmark gate).
-- `NEXT-2`: Execute `M8-006` (data-retention/redaction operations runbook + enforcement checks).
+- `NEXT-1`: Execute `M8-006` (data-retention/redaction operations runbook + enforcement checks).
+- `NEXT-2`: Execute `M8-CLOSE-001` (final M8 stabilization sweep + release notes).
 
 ## Backlog (Future Milestones)
 

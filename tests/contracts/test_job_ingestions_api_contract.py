@@ -131,7 +131,7 @@ class _LocalApiProcess:
 
     def _wait_until_ready(self) -> None:
         deadline = time.monotonic() + READINESS_TIMEOUT_SECONDS
-        probe_path = "/health"
+        probe_path = "/readiness"
         probe_url = f"{self._base_url}{probe_path}"
         while time.monotonic() < deadline:
             if self._process is None:
@@ -266,6 +266,20 @@ class JobIngestionApiContractTest(unittest.TestCase):
 
         self.assertEqual(status, 200, body)
         self.assertEqual(body.get("data", {}).get("status"), "ok")
+        self.assertIsNone(body.get("error"))
+
+    def test_readiness_endpoint_is_public_without_authorization(self) -> None:
+        status, body = _request_json(
+            self.base_url,
+            "GET",
+            "/readiness",
+            add_default_auth=False,
+        )
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body.get("data", {}).get("status"), "ready")
+        self.assertEqual(body.get("data", {}).get("checks", {}).get("process", {}).get("status"), "ok")
+        self.assertEqual(body.get("data", {}).get("checks", {}).get("database", {}).get("status"), "ok")
         self.assertIsNone(body.get("error"))
 
     def test_v1_endpoint_missing_bearer_token_returns_contract_401(self) -> None:

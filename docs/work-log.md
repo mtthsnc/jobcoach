@@ -2517,3 +2517,55 @@ Use UTC timestamps. Append entries only.
   - In this sandbox, contract tests require elevated execution due local API socket bind restrictions.
 - Next pointer:
   - Execute `M8-005` from `docs/NEXT_ACTION.md`.
+
+- START
+- 2026-03-02T09:29:48Z
+- Execute `M8-005` runtime health/readiness probes and API read-path latency benchmark gate (`p95 <= 400ms`).
+- Task IDs: M8-005
+- Changes made:
+  - Started implementation for runtime probe separation (`/health` liveness + new `/readiness` dependency checks) and deterministic read-path latency benchmark gating.
+  - Planned updates: gateway/repository probe primitives, benchmark runner + tests, make/CI wiring, and pointer/docs updates.
+- Validation evidence:
+  - Planned: targeted probe/benchmark tests, `make test`, `make validate-openapi`, migrate up/down, and `make contract-test`.
+- Blockers / risks:
+  - Contract tests expected to require elevated execution in this sandbox due local API bind restrictions.
+- Next pointer:
+  - Complete `M8-005` implementation/tests and advance pointer to `M8-006`.
+
+- END
+- 2026-03-02T09:45:27Z
+- Execute `M8-005` runtime health/readiness probes and API read-path latency benchmark gate (`p95 <= 400ms`).
+- Task IDs: M8-005
+- Changes made:
+  - Implemented runtime probe hardening in API gateway:
+    - added unauthenticated `/readiness` route in `apps/api-gateway/api_gateway/app.py` with deterministic process/database checks and stable envelopes (`200 ready`, `503 service_unavailable` with structured details),
+    - preserved deterministic `/health` liveness semantics,
+    - updated request route-template mapping to include `/readiness`.
+  - Added repository readiness primitive in `apps/api-gateway/api_gateway/repository.py`:
+    - new `probe_readiness` DB connectivity check (`SELECT 1`) with deterministic sqlite error-code reporting.
+  - Added deterministic API read-path latency benchmark gate:
+    - new runner `services/quality-eval/benchmark/api_read_latency_benchmark.py`,
+    - seeds canonical resources, times implemented GET endpoints, emits machine-readable report, and enforces `read_path_p95_ms <= 400.0` + success-rate integrity.
+  - Added/updated probe + latency tests:
+    - `tests/unit/test_job_spec_persistence.py` readiness success/failure coverage,
+    - `tests/contracts/test_job_ingestions_api_contract.py` readiness public contract test and readiness-based startup probe,
+    - new benchmark runner coverage in `tests/unit/test_api_read_latency_benchmark_runner.py`.
+  - Wired quality gates:
+    - `Makefile`: added `benchmark-api-read-latency`, report path variable, and `make test` integration,
+    - `.github/workflows/ci-placeholder.yml`: added API read-latency report output step.
+  - Updated docs/pointers:
+    - `docs/quality-gates.md`, `services/quality-eval/README.md`, `services/quality-eval/benchmark/__init__.py`, `README.md`, and `docs/api-surface.md` with readiness + latency gate coverage,
+    - `docs/decision-log.md`: added `DEC-029`,
+    - `docs/tasklist.md`: marked `M8-005` as `DONE` and advanced NEXT queue,
+    - `docs/NEXT_ACTION.md`: advanced active pointer to `M8-006`.
+- Validation evidence:
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_health_endpoint_is_public_without_authorization tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_readiness_endpoint_is_public_without_authorization tests.unit.test_job_spec_persistence.JobSpecPersistenceTest.test_readiness_endpoint_returns_503_when_database_probe_fails tests.unit.test_api_read_latency_benchmark_runner tests.unit.test_eval_orchestration_benchmark_runner` (pass)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp PYTHONDONTWRITEBYTECODE=1 make test` (pass; includes new API read-latency benchmark gate)
+  - `make validate-openapi` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m8-005-migrate-up.sqlite3 make migrate-up` (pass)
+  - `MIGRATE_DB_PATH=.tmp/m8-005-migrate-down.sqlite3 make migrate-down` (pass)
+  - `TMPDIR=/Users/maha/dev/jobcoach/.tmp JOBCOACH_API_BASE_URL=http://127.0.0.1:8011 make contract-test` (initial sandbox bind failure; pass on elevated rerun)
+- Blockers / risks:
+  - In this sandbox, contract tests require elevated execution due local API socket bind restrictions.
+- Next pointer:
+  - Execute `M8-006` from `docs/NEXT_ACTION.md`.

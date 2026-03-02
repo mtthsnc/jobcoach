@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from contextlib import closing
 from pathlib import Path
 from typing import Any
@@ -332,6 +333,45 @@ class JobSpecPersistenceTest(unittest.TestCase):
         self.assertEqual(status, 200, body)
         self.assertEqual(body.get("data", {}).get("status"), "ok")
         self.assertIsNone(body.get("error"))
+
+    def test_readiness_endpoint_is_public_without_authorization(self) -> None:
+        status, _, body = _request(
+            self.app,
+            method="GET",
+            path="/readiness",
+            add_default_auth=False,
+        )
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body.get("data", {}).get("status"), "ready")
+        self.assertEqual(body.get("data", {}).get("checks", {}).get("process", {}).get("status"), "ok")
+        self.assertEqual(body.get("data", {}).get("checks", {}).get("database", {}).get("status"), "ok")
+        self.assertIsNone(body.get("error"))
+
+    def test_readiness_endpoint_returns_503_when_database_probe_fails(self) -> None:
+        with mock.patch.object(
+            self.app._repository,
+            "probe_readiness",
+            return_value=(False, "sqlite_operationalerror"),
+        ):
+            status, _, body = _request(
+                self.app,
+                method="GET",
+                path="/readiness",
+                add_default_auth=False,
+            )
+
+        self.assertEqual(status, 503, body)
+        self.assertEqual(body.get("data", {}).get("status"), "not_ready")
+        self.assertEqual(body.get("data", {}).get("checks", {}).get("process", {}).get("status"), "ok")
+        self.assertEqual(body.get("data", {}).get("checks", {}).get("database", {}).get("status"), "failed")
+        self.assertEqual(body.get("data", {}).get("checks", {}).get("database", {}).get("reason"), "sqlite_operationalerror")
+        self.assertEqual(body.get("error", {}).get("code"), "service_unavailable")
+        self.assertEqual(
+            body.get("error", {}).get("details"),
+            [{"field": "database", "reason": "sqlite_operationalerror"}],
+        )
+        self.assertTrue(body.get("error", {}).get("retryable"))
 
     def test_v1_endpoint_missing_bearer_token_returns_401(self) -> None:
         status, headers, body = _request(

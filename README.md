@@ -157,6 +157,9 @@ Benchmark-specific commands:
 - `make benchmark-interview-relevance`
 - `make benchmark-feedback-quality`
 - `make benchmark-trajectory-quality`
+- `make benchmark-negotiation-quality`
+- `make benchmark-eval-orchestration`
+- `make benchmark-api-read-latency`
 
 Detailed quality thresholds and validation strategy: [`docs/quality-gates.md`](docs/quality-gates.md).
 
